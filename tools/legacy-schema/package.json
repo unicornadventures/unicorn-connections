@@ -1,0 +1,7 @@
+{
+  "name": "@classyear/legacy-schema-runner",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Shim that runs the source app's schema.ts unmodified, for scripts/verify-schema-parity.sh"
+}

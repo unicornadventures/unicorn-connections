@@ -1,4 +1,12 @@
-import { configuration, parseEnv, validate } from './configuration.js';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  configuration,
+  findEnvFiles,
+  parseEnv,
+  validate,
+} from './configuration.js';
 
 const minimal = {
   JWT_SECRET: 's3cret',
@@ -61,6 +69,35 @@ describe('environment validation', () => {
     expect(result.PATH).toBe('/usr/bin');
     expect(result.HOME).toBe('/root');
     expect(result.PORT).toBe(5001);
+  });
+});
+
+describe('findEnvFiles', () => {
+  // Regression guard: envFilePath used to be the fixed relative path '../.env',
+  // which pointed at the repo root only while the app lived at <root>/backend.
+  // Moving it to <root>/apps/api silently resolved to nothing and the app
+  // failed to boot. Depth must not matter.
+  it('finds a root .env from a nested workspace directory, nearest first', () => {
+    const root = mkdtempSync(join(tmpdir(), 'classyear-env-'));
+    const nested = join(root, 'apps', 'api');
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(root, '.env'), 'JWT_SECRET=root\n');
+    writeFileSync(join(nested, '.env'), 'JWT_SECRET=local\n');
+
+    const found = findEnvFiles(nested);
+
+    expect(found).toContain(join(nested, '.env'));
+    expect(found).toContain(join(root, '.env'));
+    // Nearest wins: ConfigModule takes the first file that defines a key.
+    expect(found.indexOf(join(nested, '.env'))).toBeLessThan(
+      found.indexOf(join(root, '.env')),
+    );
+  });
+
+  it('returns an empty list rather than throwing when there is no .env', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'classyear-noenv-'));
+
+    expect(findEnvFiles(empty)).toEqual([]);
   });
 });
 

@@ -1,0 +1,7 @@
+{
+  "name": "@classyear/web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ClassYear web client (React/Vite) — arrives in phase 6, see README.md",
+  "type": "module"
+}

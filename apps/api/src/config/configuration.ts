@@ -1,4 +1,30 @@
+import { existsSync } from 'node:fs';
+import { dirname, join, parse } from 'node:path';
 import { z } from 'zod';
+
+/**
+ * Collects every `.env` from the working directory up to the filesystem root,
+ * nearest first — which is the precedence ConfigModule already applies to
+ * `envFilePath` (first file to define a key wins).
+ *
+ * In a monorepo the same command gets run from the repo root (`npm run dev`),
+ * from the app directory, and from a test runner's cwd. A fixed relative path
+ * silently resolves to nothing in two of those three, so this searches instead.
+ */
+export function findEnvFiles(startDir: string = process.cwd()): string[] {
+  const found: string[] = [];
+  const { root } = parse(startDir);
+  let dir = startDir;
+
+  for (;;) {
+    const candidate = join(dir, '.env');
+    if (existsSync(candidate)) found.push(candidate);
+    if (dir === root) break;
+    dir = dirname(dir);
+  }
+
+  return found;
+}
 
 /**
  * Environment contract for the API.

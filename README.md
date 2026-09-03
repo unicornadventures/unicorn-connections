@@ -30,9 +30,9 @@ in which case set `DB_USER` to your own username in `.env`.
 | Command | What it does |
 |---|---|
 | `npm run dev` | Watch-mode server on `PORT` (default 5001) |
-| `npm run build` | `nest build` → `backend/dist` |
-| `npm test` | Vitest unit tests (`*.spec.ts` under `backend/src`) |
-| `npm run test:e2e` | Vitest e2e tests (`*.e2e-spec.ts` under `backend/test`) |
+| `npm run build` | `nest build` → `apps/api/dist` |
+| `npm test` | Vitest unit tests (`*.spec.ts` under `apps/api/src`) |
+| `npm run test:e2e` | Vitest e2e tests (`*.e2e-spec.ts` under `apps/api/test`) |
 | `npm run schema:verify` | **Schema parity gate** — see below |
 
 ## Schema parity gate
@@ -55,25 +55,46 @@ databases, dumps both with `pg_dump --schema-only`, and diffs. It reads the sour
 
 ## Layout
 
+An npm-workspaces monorepo. `packages/*` is listed before `apps/*` so shared libraries
+build first.
+
 ```
-backend/src/
-├── main.ts             # local HTTP entry point
-├── bootstrap.ts        # setup shared by main.ts, lambda.ts (phase 7), and e2e tests
-├── app.module.ts
-├── cli/init-schema.ts  # run migrations and exit
-├── config/             # Zod-validated environment contract
-├── database/           # DatabaseService (pg pool), SchemaService, SeedService
-└── health/             # /pulse
+apps/
+├── api/                    @classyear/api — the NestJS backend
+│   └── src/
+│       ├── main.ts         local HTTP entry point
+│       ├── bootstrap.ts    setup shared by main.ts, lambda.ts (phase 7), and e2e tests
+│       ├── app.module.ts
+│       ├── cli/            init-schema — run migrations and exit
+│       ├── config/         Zod-validated environment contract
+│       ├── database/       DatabaseService (pg pool), SchemaService, SeedService
+│       └── health/         /pulse
+└── web/                    @classyear/web — React SPA (phase 6, placeholder)
+packages/
+└── shared-types/           @classyear/shared-types — entity types for api + web
+tools/
+├── contract-tests/         old-vs-new endpoint parity gate (phase 1, placeholder)
+└── legacy-schema/          shim that runs the source app's schema.ts unmodified
+infra/                      SAM template and deploy scripts (phase 7, placeholder)
 scripts/
-├── verify-schema-parity.sh
-└── legacy-schema/      # shim that runs the source app's schema.ts unmodified
+└── verify-schema-parity.sh
+docs/
+└── nestjs-conversion-approach.md
 ```
+
+Why a monorepo: the source app keeps entity types in **two** places
+(`backend/src/types.ts` and `frontend/src/types.ts`) that drifted from each other and from
+the schema. `@classyear/shared-types` is the single definition, and the API and web client
+both consume it.
+
+Run scripts across every workspace with `npm run build`, `npm test`, `npm run lint` from
+the root; target one with `--workspace @classyear/api`.
 
 ## Notes for anyone picking this up
 
 - **Environment is validated at boot and the app refuses to start if it is wrong.** The
   source app fell back to defaults, which is how it ended up with two different JWT signing
-  secrets. There is no fallback here — see `backend/src/config/configuration.ts`.
+  secrets. There is no fallback here — see `apps/api/src/config/configuration.ts`.
 - **`/pulse` is the only route outside `/api`.** The global prefix excludes it, matching the
   source, where the SAM warmer hits it at the root.
 - **Raw SQL, no ORM.** Deliberate; see §3.3 of the conversion doc.

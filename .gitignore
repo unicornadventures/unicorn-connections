@@ -8,5 +8,5 @@ coverage/
 .idea/
 .aws-sam/
 tmp/
-scripts/legacy-schema/schema.ts
+tools/legacy-schema/schema.ts
 *.tsbuildinfo

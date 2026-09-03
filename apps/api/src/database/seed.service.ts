@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import bcrypt from 'bcryptjs';
+import type { User } from '@classyear/shared-types';
 import { DatabaseService } from './database.service.js';
 
 const SALT_ROUNDS = 10;
@@ -52,7 +53,7 @@ export class SeedService {
       await this.db.query('BEGIN');
 
       // 1. Check for duplicates to protect against primary key violations
-      const existingUser = await this.db.query(
+      const existingUser = await this.db.query<Pick<User, 'id'>>(
         'SELECT id FROM users WHERE email = $1',
         [ADMIN_EMAIL],
       );
@@ -66,7 +67,7 @@ export class SeedService {
       const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
       // 3. Create admin user
-      const result = await this.db.query(
+      const result = await this.db.query<Pick<User, 'id'>>(
         'INSERT INTO users (email, password, is_admin) VALUES ($1, $2, $3) RETURNING id;',
         [ADMIN_EMAIL, hashedPassword, true],
       );

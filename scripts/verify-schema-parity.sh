@@ -47,15 +47,15 @@ reset_db "$NEW_DB"
 
 echo "==> Building legacy schema with the Express app's schema.ts"
 # Copied, never committed: the source repo stays the only home for this file.
-cp "$LEGACY_SCHEMA_SRC" "$REPO_ROOT/scripts/legacy-schema/schema.ts"
-trap 'rm -f "$REPO_ROOT/scripts/legacy-schema/schema.ts"' EXIT
-PGDATABASE="$OLD_DB" node "$REPO_ROOT/scripts/legacy-schema/run.js" >"$OUT_DIR/legacy-run.log" 2>&1
+cp "$LEGACY_SCHEMA_SRC" "$REPO_ROOT/tools/legacy-schema/schema.ts"
+trap 'rm -f "$REPO_ROOT/tools/legacy-schema/schema.ts"' EXIT
+PGDATABASE="$OLD_DB" node "$REPO_ROOT/tools/legacy-schema/run.js" >"$OUT_DIR/legacy-run.log" 2>&1
 
 echo "==> Building ported schema with SchemaService"
-npm --prefix "$REPO_ROOT/backend" run build >/dev/null
+npm --prefix "$REPO_ROOT/apps/api" run build >/dev/null
 DB_NAME="$NEW_DB" DB_HOST="$PGHOST" DB_PORT="$PGPORT" \
   DB_USER="$PGUSER" DB_PASSWORD="$PGPASSWORD" \
-  node "$REPO_ROOT/backend/dist/cli/init-schema.js" >"$OUT_DIR/nest-run.log" 2>&1
+  node "$REPO_ROOT/apps/api/dist/cli/init-schema.js" >"$OUT_DIR/nest-run.log" 2>&1
 
 dump() {
   # \restrict/\unrestrict carry a per-invocation random nonce (pg_dump 14.20+),

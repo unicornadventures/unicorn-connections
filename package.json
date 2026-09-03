@@ -1,15 +1,20 @@
 {
-  "name": "classyear-nest",
+  "name": "classyear",
   "version": "1.0.0",
-  "description": "ClassYear - class reunion platform (NestJS port)",
+  "description": "ClassYear - class reunion platform (NestJS monorepo)",
   "private": true,
-  "scripts": {
-    "dev": "npm --prefix backend run start:dev",
-    "build": "npm --prefix backend run build",
-    "test": "npm --prefix backend test",
-    "schema:verify": "./scripts/verify-schema-parity.sh"
-  },
+  "_comment_workspaces": "packages/* is listed first so `npm run build --workspaces` builds shared libraries before the apps that consume them. npm runs workspace scripts in listed order, not topological order — if this list grows past a couple of libraries, that is the point to reach for Turborepo/Nx rather than hand-ordering.",
   "workspaces": [
-    "backend"
-  ]
+    "packages/*",
+    "apps/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "dev": "npm run start:dev --workspace @classyear/api",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "schema:verify": "./scripts/verify-schema-parity.sh"
+  }
 }

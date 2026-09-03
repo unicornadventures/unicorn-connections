@@ -120,10 +120,11 @@ warmer function stays and now only has to keep one function warm instead of 59.
 
 ### 3.2 Module map
 
-One Nest module per current router group, plus shared infrastructure:
+One Nest module per current router group, plus shared infrastructure. The API is one
+workspace of a monorepo (§3.4), so these paths are all under `apps/api/`:
 
 ```
-src/
+apps/api/src/
 ├── main.ts                     # local HTTP bootstrap
 ├── lambda.ts                   # serverless-express handler (cached)
 ├── app.module.ts               # imports all feature modules
@@ -183,6 +184,32 @@ Migrations stay as `SchemaService.initialize()` — a direct port of `schema.ts`
 `OnModuleInit`. One fix: the current version swallows errors in a `catch` that only logs.
 The port should rethrow (§9.1), so a broken migration fails loudly instead of leaving the
 app running against a half-built schema.
+
+### 3.4 Repository shape: a monorepo
+
+npm workspaces, `packages/*` before `apps/*` so shared libraries build first:
+
+```
+apps/api          @classyear/api            the NestJS backend
+apps/web          @classyear/web            React SPA (phase 6)
+packages/shared-types  @classyear/shared-types   entity types for both
+tools/contract-tests   the §7.3 parity gate (phase 1)
+tools/legacy-schema    shim that runs the source app's schema.ts unmodified
+infra/                 SAM template + deploy scripts (phase 7)
+scripts/               verify-schema-parity.sh
+```
+
+The motivating case is `shared-types`. The source app defines its entity types **twice** —
+`backend/src/types.ts` and `frontend/src/types.ts` — and both drifted from each other and
+from `schema.ts`. Its `User` still declares `email: string` and `password: string` when the
+schema dropped NOT NULL on both (unclaimed roster entries have neither, which is the whole
+premise of `POST /api/auth/claim-account`), and it has no `is_class_admin`,
+`email_verified`, or `is_deceased` at all despite every one of those driving authorization.
+One package, consumed by both apps, removes the drift by construction.
+
+Build orchestration is plain npm workspaces. With two apps and one library that is
+sufficient; Turborepo/Nx would buy task caching and real topological ordering, and is worth
+adding if `packages/` grows past a couple of entries — not before.
 
 ---
 
@@ -651,8 +678,8 @@ strictly blocking.
 
 ## 11. Immediate next steps
 
-1. `nest new` scaffold into `/Users/crgdncn/Code/ClassYearNest` (backend/ + frontend/
-   workspace layout mirroring the source repo), `git init`.
+1. `nest new` scaffold into `/Users/crgdncn/Code/ClassYearNest` as the `apps/api` workspace
+   of the monorepo described in §3.4, `git init`.
 2. Copy `docker-compose.yml` and add a second `postgres_test` service for integration tests.
 3. Build phase 0 and stand up the contract-test harness against a worktree of the old repo —
    the harness pays for itself from phase 1 onward.
@@ -700,7 +727,7 @@ never writes to it. This is the pattern the §7.3 contract tests will follow for
 
 ### Shipped
 
-`backend/src/` — `config/` (Zod-validated env), `database/` (`DatabaseService`,
+`apps/api/src/` — `config/` (Zod-validated env), `database/` (`DatabaseService`,
 `SchemaService`, `SeedService`), `health/` (`/pulse`), `cli/init-schema.ts`,
 `bootstrap.ts` (setup shared by `main.ts`, the future `lambda.ts`, and e2e tests).
 12 tests passing across unit + e2e. Root workspace, `docker-compose.yml`, `README.md`.

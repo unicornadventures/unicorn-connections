@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { configuration, validate } from './config/configuration.js';
+import {
+  configuration,
+  findEnvFiles,
+  validate,
+} from './config/configuration.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
 
@@ -14,9 +18,10 @@ import { HealthModule } from './health/health.module.js';
       // fallback secrets ended up in the codebase. `validate` reports every
       // missing/invalid var at once.
       validate,
-      // Mirrors the source layout: a single .env at the repo root, with an
-      // optional backend-local override taking precedence.
-      envFilePath: ['.env', '../.env'],
+      // A single .env at the monorepo root, with an optional app-local override
+      // taking precedence. Searched upward from cwd rather than hardcoded to a
+      // fixed depth — see findEnvFiles.
+      envFilePath: findEnvFiles(),
     }),
     DatabaseModule,
     HealthModule,
