@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: classyear-nest-postgres
+    environment:
+      POSTGRES_DB: class_reunion
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Scratch database for integration tests. Wiped freely — no volume, so a
+  # `docker-compose down` always leaves the next test run a clean slate.
+  postgres_test:
+    image: postgres:14-alpine
+    container_name: classyear-nest-postgres-test
+    environment:
+      POSTGRES_DB: class_reunion_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5433:5432"
+    networks:
+      - local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  local:
+    driver: bridge

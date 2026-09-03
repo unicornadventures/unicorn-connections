@@ -1,0 +1,15 @@
+{
+  "name": "classyear-nest",
+  "version": "1.0.0",
+  "description": "ClassYear - class reunion platform (NestJS port)",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix backend run start:dev",
+    "build": "npm --prefix backend run build",
+    "test": "npm --prefix backend test",
+    "schema:verify": "./scripts/verify-schema-parity.sh"
+  },
+  "workspaces": [
+    "backend"
+  ]
+}

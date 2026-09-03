@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+*.log
+.DS_Store
+.idea/
+.aws-sam/
+tmp/
+scripts/legacy-schema/schema.ts
+*.tsbuildinfo
