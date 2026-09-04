@@ -29,6 +29,11 @@ holds, the frontend needs one env var changed and nothing else.
 - Same error message strings (the frontend surfaces several of them verbatim).
 - Same database schema, so an existing Postgres volume can be pointed at the new app.
 
+**Identical to which implementation?** The source app implements everything twice (§2.1) and
+the two have drifted apart on the wire, not just internally. **The Lambda handlers are the
+reference** — see §14 for the decision and the evidence. Where this document describes
+behaviour in terms of the Express routers, the Lambda version wins on conflict.
+
 Anything we deliberately change (§9) is listed explicitly rather than changed silently.
 
 ---
@@ -766,3 +771,79 @@ convenience:
 Native Postgres covers phases 1–6 fine. Docker needs to be reinstalled before phase 7, and
 before any integration test that wants a disposable database. Not a blocker now; would be a
 surprise later.
+
+---
+
+## 14. Contract decision: the Lambda handlers are the reference
+
+Decided 2026-09-03, at the start of phase 1, once the auth port made the divergence concrete.
+
+### The problem
+
+§2.1 noted that the Express routers and Lambda handlers "have drifted". Reading them
+side by side for `/api/auth`, the drift is **on the wire**, not just internal:
+
+| `POST /api/auth/login` | Express | Lambda |
+|---|---|---|
+| response | `{token, user:{id, email, is_admin, is_class_admin, created_at, profile, user_id, first_name, last_name}}` | `{user:{user_id, email, is_admin, is_class_admin, profile}, token}` |
+| 400 | `Email and password are required.` | `Email and password required.` |
+| 500 | `Internal server error during login.` | `Internal server error (auth.ts).` |
+| JWT claims | `id, email, is_admin, profile, user_id, first_name, last_name` | `id, email, is_admin, is_class_admin` |
+| `Set-Cookie` | yes, httpOnly `token` | none |
+| user with null password | `bcrypt.compare(pw, null)` throws → 500 | explicit check → 401 |
+
+Authorization diverges too. Express uses the `middleware/adminAuth.ts` family, which
+**re-reads the user row from the database** on every request and returns
+`Missing or invalid authorization token.` / `Super admin access required.`. Lambda uses
+`getAuthUser`, which is **bearer-only, JWT-only, no database read** — it trusts the
+`is_admin`/`is_class_admin` claims — and returns `Authentication required.` /
+`Admin access required.`, using that same 403 string for both admin and super-admin checks.
+
+### The decision
+
+**Port the Lambda behaviour.** Three reasons:
+
+1. **It is what is deployed.** API Gateway routes to the Lambda handlers; the Express server
+   only ever runs on a developer's laptop.
+2. **The frontend is written against it.** `Login.tsx` reads `userData.user_id` and
+   `userData.profile` — the Lambda shape. (It also reads `userData.created_at`, which Lambda
+   never sends, so that field is silently `undefined` in production today.)
+3. **Where they differ on correctness, Lambda is right.** Express's `reset-password` selects
+   only `user_id` and then reads `resetRecord.token_hash`, which is `undefined`, so
+   `verifyResetToken` compares a hash against `undefined` and always fails. That endpoint
+   **cannot succeed** — it is not merely racy as §9.2 originally described. Lambda hashes the
+   submitted token and looks it up by `token_hash`, which is correct.
+
+This supersedes §9.2 item 3 for `reset-password`. It still stands for Express's
+`verify-email`, which is Express-only (below).
+
+### Endpoints that exist only in Express
+
+`/api/auth/me`, `/api/auth/logout`, and `/api/auth/verify-email` have no Lambda function and
+no route in `template.yaml`. **All three are included in the port.**
+
+- `/me` and `/logout` are cheap and unused by the frontend app code (`logout` clears
+  `localStorage` client-side; `/me` appears only in `api.test.ts`).
+- `/verify-email` matters: `VerifyEmail.tsx` posts to it, so **email verification is broken
+  in production today** — the call hits a route that does not exist. Including it fixes a
+  live feature. Its token lookup is written the correct way (look up by `token_hash`) rather
+  than reproducing the Express "most recent token globally" flaw.
+
+### Consequences for the contract tests
+
+The reference implementation is a set of **functions**, not a server. The old handlers take
+an `APIGatewayProxyEvent` and return an `APIGatewayProxyResult`, so `tools/contract-tests`
+invokes them directly rather than booting the Express app and diffing HTTP. That is simpler
+than the worktree-plus-running-server approach §7.3 assumed, and it removes the risk of
+accidentally certifying the port against behaviour nobody runs.
+
+### Consequence for the guards
+
+§3.2's five-guard module map was derived from the Express middleware. Under the Lambda
+model only the first three are route-level concerns:
+
+- `JwtAuthGuard`, `AdminGuard`, `SuperAdminGuard` — built in phase 1.
+- `UserAdminGuard`, `EventAdminGuard` — **deferred**. Lambda performs these per-class checks
+  *inline inside each handler*, after argument parsing and with endpoint-specific messages,
+  not as route-level middleware. They become a `ClassScopeService` injected where needed,
+  built in phases 3 and 5 alongside their first real consumers rather than guessed at now.

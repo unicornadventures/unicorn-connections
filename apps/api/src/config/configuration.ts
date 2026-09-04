@@ -64,6 +64,7 @@ export const envSchema = z
     S3_ENDPOINT: z.string().default('http://localhost:4566'),
     S3_BUCKET_NAME: z.string().optional(),
     ADMIN_SEED_PASSWORD_PARAM: z.string().optional(),
+    PASSWORD_RESET_QUEUE_URL: z.string().optional(),
 
     FEEDBACK_ENABLED: z.enum(['true', 'false']).default('true'),
   })
@@ -125,6 +126,7 @@ export interface AppConfig {
   awsRegion: string;
   feedbackEnabled: boolean;
   adminSeedPasswordParam?: string;
+  passwordResetQueueUrl?: string;
   database: DatabaseConfig;
 }
 
@@ -145,6 +147,7 @@ export const configuration = (): AppConfig => {
     // disables the feedback module; anything else leaves it on.
     feedbackEnabled: env.FEEDBACK_ENABLED !== 'false',
     adminSeedPasswordParam: env.ADMIN_SEED_PASSWORD_PARAM,
+    passwordResetQueueUrl: env.PASSWORD_RESET_QUEUE_URL,
     database: {
       host: env.DB_HOST,
       port: env.DB_PORT,

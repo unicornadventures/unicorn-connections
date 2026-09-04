@@ -15,6 +15,7 @@
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "npm run test:e2e --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "schema:verify": "./scripts/verify-schema-parity.sh"
+    "schema:verify": "./scripts/verify-schema-parity.sh",
+    "contract:verify": "./scripts/run-contract-tests.sh"
   }
 }

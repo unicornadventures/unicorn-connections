@@ -2,6 +2,18 @@
   "name": "@classyear/contract-tests",
   "version": "1.0.0",
   "private": true,
-  "description": "Old-vs-new endpoint parity gate — arrives in phase 1, see README.md",
-  "type": "module"
+  "description": "Old-vs-new endpoint parity gate — invokes the deployed Lambda handlers and diffs them against the NestJS app",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@classyear/api": "*",
+    "@nestjs/testing": "^12.0.1",
+    "bcryptjs": "^3.0.3",
+    "pg": "^8.23.0",
+    "supertest": "^7.0.0",
+    "vitest": "^4.1.2"
+  }
 }

@@ -7,6 +7,9 @@ import {
 } from './config/configuration.js';
 import { DatabaseModule } from './database/database.module.js';
 import { HealthModule } from './health/health.module.js';
+import { TokensModule } from './tokens/tokens.module.js';
+import { EmailModule } from './email/email.module.js';
+import { AuthModule } from './auth/auth.module.js';
 
 @Module({
   imports: [
@@ -24,9 +27,12 @@ import { HealthModule } from './health/health.module.js';
       envFilePath: findEnvFiles(),
     }),
     DatabaseModule,
+    TokensModule,
+    EmailModule,
     HealthModule,
-    // Feature modules land here in phases 1–5:
-    // AuthModule, UsersModule, SchoolsModule, ClassesModule,
+    AuthModule,
+    // Remaining feature modules land here in phases 2–5:
+    // UsersModule, SchoolsModule, ClassesModule,
     // CommentsModule, EventsModule, PhotosModule, FeedbackModule, AdminModule
   ],
 })
