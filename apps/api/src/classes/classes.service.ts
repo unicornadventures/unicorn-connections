@@ -1,8 +1,18 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import type { AuthUser } from '../common/auth-user.js';
 import { rethrowAsInternal } from '../common/http-errors.js';
 import { S3Service } from '../photos/s3.service.js';
 import { ClassesRepository } from './classes.repository.js';
+
+/** Class years are seeded from this year forward; nothing older can be linked. */
+const EARLIEST_CLASS_YEAR = 1950;
 
 /**
  * `/api/classes` plus `GET /api/schools/:schoolId/classes`, ported from
@@ -173,6 +183,136 @@ export class ClassesService {
       ).filter((photo) => !!photo.url);
 
       return { photos };
+    } catch (error) {
+      rethrowAsInternal(error, 'Internal server error.', this.logger);
+    }
+  }
+
+  // ---- admin ---------------------------------------------------------------
+
+  /**
+   * Links one existing class year to a school.
+   *
+   * Classes are global — `schema.ts` seeds one row per year from 1950 to the
+   * current year — so this creates a `class_school` row rather than a class.
+   * The body carries a `year`, not a class id, and the year must already exist.
+   */
+  async linkClassToSchool(schoolId: string, year?: number) {
+    try {
+      if (!schoolId || !year) {
+        throw new BadRequestException({
+          error: 'School ID and year are required.',
+        });
+      }
+
+      if (!(await this.repo.schoolExists(schoolId))) {
+        throw new NotFoundException({ error: 'School not found.' });
+      }
+
+      const klass = await this.repo.findClassByYear(year);
+      if (!klass) {
+        throw new NotFoundException({ error: `Class year ${year} not found.` });
+      }
+
+      if (await this.repo.isLinked(String(klass.id), schoolId)) {
+        throw new ConflictException({
+          error: `Class year ${year} is already linked to this school.`,
+        });
+      }
+
+      await this.repo.linkClass(klass.id, schoolId);
+
+      return { class: klass };
+    } catch (error) {
+      rethrowAsInternal(error, 'Internal server error.', this.logger);
+    }
+  }
+
+  /**
+   * Links every year from `startYear` to the current one — how a new school is
+   * set up in a single call rather than seventy.
+   *
+   * Idempotent: each insert is ON CONFLICT DO NOTHING, so re-running it after
+   * adding a year links only the gap. Returns the school's full class list
+   * afterwards, not just the newly linked ones.
+   */
+  async bulkLinkClasses(schoolId: string, startYear?: number) {
+    try {
+      const currentYear = new Date().getFullYear();
+
+      if (!schoolId) {
+        throw new BadRequestException({ error: 'School ID required.' });
+      }
+      if (!startYear || startYear < EARLIEST_CLASS_YEAR || startYear > currentYear) {
+        throw new BadRequestException({
+          error: `startYear must be between ${EARLIEST_CLASS_YEAR} and ${currentYear}.`,
+        });
+      }
+
+      if (!(await this.repo.schoolExists(schoolId))) {
+        throw new NotFoundException({ error: 'School not found.' });
+      }
+
+      const classes = await this.repo.findClassesInYearRange(
+        startYear,
+        currentYear,
+      );
+
+      // Sequential rather than Promise.all: the source does it in a loop, and a
+      // burst of seventy inserts would contend for pool connections with every
+      // other request in flight.
+      for (const klass of classes) {
+        await this.repo.linkClassToSchool(klass.id, schoolId);
+      }
+
+      return { classes: await this.repo.listSchoolClasses(schoolId) };
+    } catch (error) {
+      rethrowAsInternal(error, 'Internal server error.', this.logger);
+    }
+  }
+
+  /**
+   * Unlinks a class year from a school, optionally deleting its members.
+   *
+   * `?cascadeUsers=true` deletes every user in that class at that school along
+   * with their photos; without it the users survive and only their memberships
+   * go. The flag is a query parameter on a DELETE, which is easy to omit by
+   * accident — but omitting it is the *safe* direction, so the default is
+   * benign.
+   *
+   * The class row itself is never deleted, only the link: other schools may
+   * share the year.
+   */
+  async unlinkClassFromSchool(
+    schoolId: string,
+    classId: string,
+    cascadeUsers: boolean,
+  ) {
+    try {
+      if (!(await this.repo.isLinked(classId, schoolId))) {
+        throw new NotFoundException({
+          error: 'Class is not linked to this school.',
+        });
+      }
+
+      if (cascadeUsers) {
+        // Photos first, while the rows that identify them still exist.
+        await this.s3.deleteFolder(`photos/${schoolId}/${classId}/`);
+
+        const userIds = await this.repo.findUserIdsInClassAtSchool(
+          classId,
+          schoolId,
+        );
+        if (userIds.length > 0) {
+          await this.repo.deleteUsers(userIds);
+        }
+      } else {
+        await this.repo.deleteClassMemberships(classId, schoolId);
+      }
+
+      await this.repo.unlinkClass(classId, schoolId);
+
+      return { message: 'Class unlinked from school successfully.' };
     } catch (error) {
       rethrowAsInternal(error, 'Internal server error.', this.logger);
     }

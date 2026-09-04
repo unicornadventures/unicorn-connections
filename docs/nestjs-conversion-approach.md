@@ -2,7 +2,8 @@
 
 **Target directory:** `/Users/crgdncn/Code/ClassYearNest`
 **Source of truth (read-only):** `/Users/crgdncn/Code/ClassYear`
-**Status:** phase 4 complete (2026-09-03) — §13 phase 0, §14 the contract decision, §15–§17 phases 2–4
+**Status:** phase 5 complete (2026-09-03) — the API surface is done. §13 phase 0, §14 the
+contract decision, §15–§18 phases 2–5. Remaining: frontend (6), deploy (7), domains (8).
 **Written:** 2026-09-03
 
 > The existing ClassYear repo is the behavioural spec: every decision below is stated in
@@ -638,9 +639,11 @@ Everything the port does differently from the source, in one place.
 
 1. **`?requesterId=` authorization** in comments and photos — trivially spoofable. Fix is
    to derive identity from the JWT, which requires a coordinated frontend change.
-2. **Unguarded admin endpoints** — `POST /api/admin/seed`, `GET /api/admin/users`,
-   `PUT /api/admin/users/:userId`, `PUT /api/admin/users/:userId/move-class`,
-   `POST /api/admin/registration-links` have no guard.
+2. ~~**Unguarded admin endpoints**~~ — **WITHDRAWN in phase 5 (§18).** True of the Express
+   router, false of the deployed handlers, every one of which opens with its own
+   `is_admin` check. Since the deployed handlers are the contract (§14), the port is
+   guarded and there is nothing to fix. `POST /api/admin/seed` has no deployed route at
+   all and is not ported.
 3. **`reset-password` / `verify-email` token selection.** Both do
    `SELECT ... WHERE expires_at > NOW() ORDER BY created_at DESC LIMIT 1` and *then* compare
    the hash — they pick the single most-recent token **globally**, not the one matching the
@@ -692,6 +695,12 @@ And in phase 4:
 | `s3Service.updatePhotoUrlInDatabase` | Throws whenever called — wrong table, wrong column. Referenced only by its own unit test (§8.1) |
 | `s3Service.uploadFileToS3` | Only consumer is the undeployed multipart route |
 
+And in phase 5:
+
+| Route | Why not |
+|---|---|
+| `POST /api/admin/seed` | Not deployed. Admin seeding happens at boot from an SSM SecureString (§8.4), not over HTTP |
+
 Each is a dozen lines to restore if a consumer turns up. Contrast §14's treatment of the
 three Express-only *auth* endpoints, which were included: `/verify-email` had a live
 frontend caller, and `/me` and `/logout` are read-only and free.
@@ -709,7 +718,7 @@ Each phase ends at a green gate. Nothing merges past a red contract test.
 | **2** ✅ | `UsersModule`, `SchoolsModule`, `ClassesModule` — the read-heavy core | Contract tests green; frontend directory + profile pages work against Nest — see §15 |
 | **3** ✅ | `CommentsModule` (both mounts), `EventsModule`, `FeedbackModule` | Contract tests green; feature flag verified in both states — see §16 |
 | **4** ✅ | `PhotosModule` + S3 (**no multipart — none is deployed, §17**) | Upload/delete verified against a real object store; binary handling n/a — see §17 |
-| **5** | `AdminModule` + `adminSchools`/`adminClasses`/`adminEvents` incl. CSV import + bulk link | Full 74-endpoint contract suite green |
+| **5** ✅ | `AdminModule` + `adminSchools`/`adminClasses`/`adminEvents` incl. CSV import + bulk link | Full contract suite green — see §18 |
 | **6** | Frontend: copy `frontend/` across, point `VITE_API_BASE_URL` at the Nest server | Vitest + Playwright e2e green against Nest |
 | **7** | Deployment: minimal SAM template, single proxy function, warmer, email worker; new stack `classyear-nest`, own Aurora cluster, served at `nest.reunion-connect.org` (§8.6) | Smoke test against deployed stack; **both** live domains still served by the old app |
 | **8** | Domain split (§8.6): verify SES identity for `noreply@unicornconnections.org` → old stack drops to `unicornconnections.org` only → new stack claims `reunion-connect.org` + `www` | `unicornconnections.org` serves the old app, `reunion-connect.org` serves the new app, both HTTP 200 with valid certs; password reset sends correctly from both |
@@ -1253,3 +1262,156 @@ pointing at nothing, which is why every read path tolerates a missing object.
 - The contract harness now manages both Postgres *and* MinIO. Admin school and
   class deletes will exercise `deleteFolder` against real objects, so seed a few
   under a prefix that is meant to be swept.
+
+---
+
+## 18. Phase 5 — done (2026-09-03)
+
+`AdminModule` plus the admin halves of Schools, Classes and Events. Seventeen
+endpoints, and the last of the API surface.
+
+### Gate
+
+| Gate | Result |
+|---|---|
+| Full contract suite green | ✅ 240 assertions across 9 spec files |
+| Schema parity still green | ✅ 78 statements, zero diff |
+| Unit + e2e | ✅ 221 unit, 3 e2e |
+| Typecheck | ✅ new `npm run typecheck` |
+
+### The correction: the deployed admin routes *are* guarded
+
+§5.5 and §9.2 item 2 both recorded that several `/api/admin/*` routes "carry no
+guard at all today" — naming `GET /api/admin/users`, `PUT /api/admin/users/:userId`,
+`/move-class`, `POST /api/admin/registration-links` and `POST /api/admin/seed`.
+
+**That is true of the Express router and false of the deployed handlers.** Every
+one of those Lambda handlers opens with
+
+```ts
+if (!authUser) return errorResponse(401, 'Authentication required.');
+if (!authUser.is_admin) return errorResponse(403, 'Admin access required.');
+```
+
+Since the deployed handlers are the contract (§14), the port is guarded, and the
+security concern §9.2 raised does not exist in production. §9.2 item 2 is struck.
+`POST /api/admin/seed` has no deployed route at all and is not ported (§9.4).
+
+Three guard levels are in play, and the contract tests pin which account reaches
+what:
+
+| Guard | Routes |
+|---|---|
+| `SuperAdminGuard` (`is_admin`) | 14 of the 17 |
+| `AdminGuard` (`is_admin` **or** `is_class_admin`) then `canManageUser` | `DELETE /api/admin/users/:userId` |
+| `JwtAuthGuard` only, with `canManageUser` doing all the gating | `PUT /api/admin/users/:userId/profile` |
+| `JwtAuthGuard` only, with `canManageEvent` doing all the gating | `POST /api/admin/schools/…/events` |
+
+The last two are genuinely only token-guarded at the route level. An ordinary
+user reaching `PUT /users/:userId/profile` gets `Access denied. You can only
+manage users in your class.` rather than the guard's `Admin access required.` —
+the distinct message is how the tests tell the two paths apart.
+
+### `ClassScopeService` is complete
+
+`canManageUser` joins the four predicates from phases 3 and 4, finishing §14's
+`UserAdminGuard` replacement. Five predicates, and only `canModerateComments`
+re-reads roles from the database; the rest trust the token. That split is the
+source's and is asserted by unit tests so a well-meaning harmonisation fails
+loudly.
+
+### The `BEGIN`/`COMMIT` that never worked
+
+Three handlers wrap writes in `BEGIN`/`COMMIT` with a `ROLLBACK` in the catch:
+`updateUserProfileHandler`, `moveUserClassHandler` and `createSchoolHandler`.
+
+**None of them is a transaction.** `db.ts`'s `query()` calls `pool.query()`,
+which checks out an arbitrary idle client per statement, so the `BEGIN` and the
+`UPDATE` can land on different connections. It usually appears to work because
+node-postgres hands back the most-recently-released client, but nothing
+guarantees it; under concurrency it leaves a connection idle-in-transaction
+while the write goes through unwrapped. The stray `ROLLBACK` is harmless —
+Postgres warns and moves on when no transaction is open.
+
+The port runs the statements as they actually run today, without the ceremony.
+Making them genuinely atomic (a pinned client from the pool) would be an
+improvement, and is filed in §9.2 rather than done here, because it changes what
+a half-failed request leaves behind.
+
+### Preserved bug-for-bug
+
+1. **`POST /api/admin/schools/:schoolId/classes/:classId/events` 500s when
+   `location` is omitted.** It is optional on the wire and NOT NULL in the
+   schema, so the INSERT fails. Pinned by a contract test.
+2. **Validation before authorization on that same endpoint**, the opposite of
+   its update and delete siblings — a member with no rights and an incomplete
+   body gets the 400, not the 403.
+3. **`PUT /api/admin/schools/:schoolId` is a full replace, not a patch.**
+   Omitting `timezone` nulls it, unlike the COALESCE updates everywhere else.
+4. **`move-class` drops the school context.** The INSERT supplies no
+   `school_id`, so a moved user's membership loses it and
+   `GET /api/users/:id/class` reports a null school for anyone who has been
+   moved.
+5. **Deleting a user sweeps only their two profile photos**, not their gallery,
+   so gallery objects are orphaned in S3.
+
+### Destructive-path ordering, which is deliberate
+
+`DELETE /api/admin/schools/:schoolId` and the `?cascadeUsers=true` branch of the
+class unlink both sweep an S3 prefix *before* touching the database — once the
+rows are gone there is nothing left to say which keys belonged to what. Users
+are deleted explicitly rather than by cascade, because they hang off
+`class_user` rather than `schools` and a cascade would orphan them.
+
+Unlike the per-user delete, an S3 failure on these paths is **not** swallowed:
+it propagates, the database is untouched, and the operation can be retried. Unit
+tests assert both orderings.
+
+### A real bug the gate caught: `getPool()` was not concurrency-safe
+
+The full suite began failing roughly one run in three, always on a different
+assertion, always only when every file ran together. That intermittency is the
+tell — a consistent failure is a wrong expectation, a flaky one is usually a
+resource.
+
+`DatabaseService.getPool()` cached the resolved pool:
+
+```ts
+if (this.pool) return this.pool;
+const { user, password } = await this.resolveCredentials();  // ← yields here
+this.pool = new Pool({ ... });
+```
+
+The `await` sits between the check and the assignment, so two concurrent first
+queries each build a `Pool`. One wins the slot; the other is never assigned,
+never `end()`ed, and holds its connections until they idle out. Any handler
+issuing two queries with `Promise.all` triggers it on the first request after
+boot — `AdminService.listClassUsers`, `UsersService.listUsers` and
+`ClassesService.getPhotos` all do. Nine spec files each booting an app, against
+`max_connections = 100`, is enough pressure to fail occasionally.
+
+The fix caches the in-flight **promise**, assigned synchronously before the
+first `await`, and clears the slot on failure so a rejected attempt does not
+poison every later call. Three consecutive full-suite runs are green.
+
+Worth stating plainly: this is a bug in code written for this port, not one
+inherited from the source, and it would have leaked a pool on **every Lambda
+cold start** whose first request happened to fan out. Nothing in the unit tests
+could have found it — they never construct a pool. It also motivated the new
+`npm run typecheck`, added after a related gap: `nest build` excludes spec
+files, so a spec that no longer matched its service's constructor compiled
+clean and ran anyway, because Vitest transpiles without checking types.
+
+### Notes for phase 6
+
+- The API surface is complete. Phase 6 copies `frontend/` across and points
+  `VITE_API_BASE_URL` at the Nest server.
+- `AVATAR_COLORS` in `common/avatar-colors.ts` duplicates
+  `frontend/src/avatarColors.ts`. It should move to `@classyear/shared-types`
+  once the frontend lands, which is the duplication that package exists for.
+- The frontend still sends `?requesterId=` and `commenterId` on several calls.
+  All are ignored by the deployed contract and therefore by the port; removing
+  them is a frontend cleanup, not an API change.
+- `GET /api/auth/me` and `/logout` are ported but unused by the app; `/verify-email`
+  is ported and **fixes** a broken production feature (§14). Worth a manual
+  check once the frontend is wired up.

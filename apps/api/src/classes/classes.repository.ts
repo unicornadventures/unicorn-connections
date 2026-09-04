@@ -188,6 +188,86 @@ export class ClassesRepository {
     return result.rows;
   }
 
+  // ---- admin ---------------------------------------------------------------
+
+  async schoolExists(schoolId: string): Promise<boolean> {
+    const result = await this.db.query('SELECT id FROM schools WHERE id = $1', [
+      schoolId,
+    ]);
+    return result.rows.length > 0;
+  }
+
+  async findClassByYear(
+    year: number,
+  ): Promise<{ id: number; year: number } | undefined> {
+    const result = await this.db.query<{ id: number; year: number }>(
+      'SELECT id, year FROM classes WHERE year = $1',
+      [year],
+    );
+    return result.rows[0];
+  }
+
+  async isLinked(classId: string, schoolId: string): Promise<boolean> {
+    const result = await this.db.query(
+      'SELECT 1 FROM class_school WHERE class_id = $1 AND school_id = $2',
+      [classId, schoolId],
+    );
+    return result.rows.length > 0;
+  }
+
+  /** Plain INSERT, no ON CONFLICT — the caller has already checked for a link. */
+  async linkClass(classId: number, schoolId: string): Promise<void> {
+    await this.db.query(
+      'INSERT INTO class_school (class_id, school_id) VALUES ($1, $2)',
+      [classId, schoolId],
+    );
+  }
+
+  async findClassesInYearRange(
+    startYear: number,
+    endYear: number,
+  ): Promise<{ id: number; year: number }[]> {
+    const result = await this.db.query<{ id: number; year: number }>(
+      'SELECT id, year FROM classes WHERE year >= $1 AND year <= $2 ORDER BY year DESC;',
+      [startYear, endYear],
+    );
+    return result.rows;
+  }
+
+  async findUserIdsInClassAtSchool(
+    classId: string,
+    schoolId: string,
+  ): Promise<number[]> {
+    const result = await this.db.query<{ id: number }>(
+      `SELECT u.id FROM class_user cu JOIN users u ON cu.user_id = u.id
+       WHERE cu.class_id = $1 AND cu.school_id = $2`,
+      [classId, schoolId],
+    );
+    return result.rows.map((row) => row.id);
+  }
+
+  async deleteUsers(userIds: number[]): Promise<void> {
+    await this.db.query('DELETE FROM users WHERE id = ANY($1)', [userIds]);
+  }
+
+  /** Removes memberships but leaves the users themselves. */
+  async deleteClassMemberships(
+    classId: string,
+    schoolId: string,
+  ): Promise<void> {
+    await this.db.query(
+      'DELETE FROM class_user WHERE class_id = $1 AND school_id = $2',
+      [classId, schoolId],
+    );
+  }
+
+  async unlinkClass(classId: string, schoolId: string): Promise<void> {
+    await this.db.query(
+      'DELETE FROM class_school WHERE class_id = $1 AND school_id = $2',
+      [classId, schoolId],
+    );
+  }
+
   async listMemberGalleryKeys(
     classId: string,
   ): Promise<{ user_id: number; s3_key: string }[]> {

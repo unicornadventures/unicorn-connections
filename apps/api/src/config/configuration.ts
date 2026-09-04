@@ -108,7 +108,9 @@ export function parseEnv(source: Record<string, unknown>): Env {
  * environment so defaults are applied without stripping the unrelated keys
  * (PATH, HOME, AWS_*) that a bare schema parse would drop.
  */
-export function validate(config: Record<string, unknown>) {
+export function validate(
+  config: Record<string, unknown>,
+): Record<string, unknown> & Env {
   return { ...config, ...parseEnv(config) };
 }
 

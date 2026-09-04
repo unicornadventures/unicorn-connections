@@ -117,7 +117,36 @@ export class ClassScopeService {
     return this.sharesAClass(authUser.id, targetUserId);
   }
 
-  /** Do these two users have any class in common? */
+  /**
+   * Can this user edit or delete `targetUserId`'s account — their name, their
+   * deceased flag, or the row itself?
+   *
+   * Super admins anywhere; class admins only for someone in one of their
+   * classes; nobody else. Roles come from the token.
+   *
+   * This is §3.2's `UserAdminGuard`, which §14 deferred and phase 5 built here
+   * for the same reason as the others: it needs the target's id, which is a
+   * route parameter the handler has already parsed and validated by the time
+   * the question is worth asking.
+   */
+  async canManageUser(
+    authUser: AuthUser,
+    targetUserId: number,
+  ): Promise<boolean> {
+    if (authUser.is_admin) return true;
+    if (!authUser.is_class_admin) return false;
+
+    return this.sharesAClass(authUser.id, targetUserId);
+  }
+
+  /**
+   * Do these two users have any class in common?
+   *
+   * The source writes this two ways — a self-join in `photos.ts`, an
+   * `IN (SELECT …)` subquery in `comments.ts` and `admin.ts` — which are the
+   * same existence question and return the same answer. One form here rather
+   * than two, since the contract suite would catch any behavioural difference.
+   */
   private async sharesAClass(
     userId: number,
     otherUserId: number,

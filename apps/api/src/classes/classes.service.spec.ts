@@ -11,8 +11,11 @@ const photoUrls = {
     keys.map((key) => (key ? `signed:${key}` : null)),
 } as unknown as S3Service;
 
-function serviceWith(repo: Partial<ClassesRepository>) {
-  return new ClassesService(repo as ClassesRepository, photoUrls);
+function serviceWith(
+  repo: Partial<ClassesRepository>,
+  s3: S3Service = photoUrls,
+) {
+  return new ClassesService(repo as ClassesRepository, s3);
 }
 
 const asUser = (over: Partial<AuthUser> = {}): AuthUser => ({
@@ -213,6 +216,144 @@ describe('ClassesService.getClass', () => {
     const service = serviceWith({ findClass: async () => undefined });
 
     await expectRejection(service.getClass('9999'), 404, 'Class not found.');
+  });
+});
+
+describe('ClassesService admin link management', () => {
+  it('409s when the year is already linked', async () => {
+    const service = serviceWith({
+      schoolExists: async () => true,
+      findClassByYear: async () => ({ id: 1, year: 1994 }),
+      isLinked: async () => true,
+    });
+
+    await expectRejection(
+      service.linkClassToSchool('1', 1994),
+      409,
+      'Class year 1994 is already linked to this school.',
+    );
+  });
+
+  it('404s for a year with no class row', async () => {
+    const service = serviceWith({
+      schoolExists: async () => true,
+      findClassByYear: async () => undefined,
+    });
+
+    await expectRejection(
+      service.linkClassToSchool('1', 1066),
+      404,
+      'Class year 1066 not found.',
+    );
+  });
+
+  it('checks the school before the year', async () => {
+    const service = serviceWith({
+      schoolExists: async () => false,
+      findClassByYear: async () => undefined,
+    });
+
+    await expectRejection(
+      service.linkClassToSchool('9999', 1066),
+      404,
+      'School not found.',
+    );
+  });
+
+  it.each([1949, new Date().getFullYear() + 1])(
+    'rejects a startYear of %i',
+    async (startYear) => {
+      const service = serviceWith({});
+
+      await expectRejection(
+        service.bulkLinkClasses('1', startYear),
+        400,
+        `startYear must be between 1950 and ${new Date().getFullYear()}.`,
+      );
+    },
+  );
+
+  it('links every year in range, oldest last', async () => {
+    const linked: number[] = [];
+    const service = serviceWith({
+      schoolExists: async () => true,
+      findClassesInYearRange: async () => [
+        { id: 3, year: 2026 },
+        { id: 2, year: 1995 },
+        { id: 1, year: 1994 },
+      ],
+      linkClassToSchool: async (classId) => {
+        linked.push(classId);
+      },
+      listSchoolClasses: async () => [],
+    });
+
+    await service.bulkLinkClasses('1', 1994);
+
+    expect(linked).toEqual([3, 2, 1]);
+  });
+});
+
+describe('ClassesService.unlinkClassFromSchool', () => {
+  it('removes memberships but keeps the users by default', async () => {
+    const order: string[] = [];
+    const service = serviceWith(
+      {
+        isLinked: async () => true,
+        deleteClassMemberships: async () => {
+          order.push('memberships');
+        },
+        deleteUsers: async () => {
+          order.push('users');
+        },
+        unlinkClass: async () => {
+          order.push('unlink');
+        },
+      },
+      photoUrls,
+    );
+
+    await service.unlinkClassFromSchool('1', '1', false);
+
+    expect(order).toEqual(['memberships', 'unlink']);
+  });
+
+  /** Photos first, while the rows that identify them still exist. */
+  it('sweeps photos and deletes users when cascading', async () => {
+    const order: string[] = [];
+    const s3 = {
+      deleteFolder: async (prefix: string) => {
+        order.push(`s3:${prefix}`);
+      },
+    } as unknown as S3Service;
+
+    const service = new ClassesService(
+      {
+        isLinked: async () => true,
+        findUserIdsInClassAtSchool: async () => [10],
+        deleteUsers: async () => {
+          order.push('users');
+        },
+        unlinkClass: async () => {
+          order.push('unlink');
+        },
+      } as unknown as ClassesRepository,
+      s3,
+    );
+
+    await service.unlinkClassFromSchool('1', '2', true);
+
+    expect(order).toEqual(['s3:photos/1/2/', 'users', 'unlink']);
+  });
+
+  it('404s when the class is not linked to that school', async () => {
+    const service = serviceWith({ isLinked: async () => false });
+
+    await expectRejection(
+      service.unlinkClassFromSchool('2', '1', false),
+      404,
+      'Class is not linked to this school.',
+    );
   });
 });
 

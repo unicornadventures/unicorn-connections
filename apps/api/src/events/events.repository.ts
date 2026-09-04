@@ -114,6 +114,46 @@ export class EventsRepository {
     return result.rows[0];
   }
 
+  async isClassLinkedToSchool(
+    classId: string,
+    schoolId: string,
+  ): Promise<boolean> {
+    const result = await this.db.query(
+      'SELECT 1 FROM class_school WHERE class_id = $1 AND school_id = $2',
+      [classId, schoolId],
+    );
+    return result.rows.length > 0;
+  }
+
+  /** Same `timezone`-less shape as the update; see `updateEvent`. */
+  async createEvent(
+    classId: string,
+    schoolId: string,
+    event: {
+      title: string;
+      description: string | null;
+      eventDate: string;
+      eventTime: string;
+      location: string | null;
+    },
+  ): Promise<Omit<EventRow, 'timezone'>> {
+    const result = await this.db.query<Omit<EventRow, 'timezone'>>(
+      `INSERT INTO events (class_id, school_id, event_name, description, event_date, event_time, location)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, class_id, school_id, event_name as title, description, to_char(event_date, 'YYYY-MM-DD') as event_date, event_time, location, created_at, updated_at;`,
+      [
+        classId,
+        schoolId,
+        event.title,
+        event.description,
+        event.eventDate,
+        event.eventTime,
+        event.location,
+      ],
+    );
+    return result.rows[0];
+  }
+
   async deleteEvent(eventId: string): Promise<void> {
     await this.db.query('DELETE FROM events WHERE id = $1 RETURNING id;', [
       eventId,

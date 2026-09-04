@@ -4,9 +4,10 @@ A NestJS port of the [ClassYear](../ClassYear) class-reunion platform. The conve
 including the full endpoint inventory and the phased migration, lives in
 [`docs/nestjs-conversion-approach.md`](docs/nestjs-conversion-approach.md).
 
-**Status: phase 4 complete.** 47 endpoints live: `/pulse`, `/api/auth`, `/api/users`,
-`/api/schools`, `/api/classes`, `/api/comments`, `/api/events`, `/api/feedback`,
-`/api/photos`. Admin lands in phase 5.
+**Status: phase 5 complete — the API surface is done.** 64 endpoints across `/pulse`,
+`/api/auth`, `/api/users`, `/api/schools`, `/api/classes`, `/api/comments`, `/api/events`,
+`/api/feedback`, `/api/photos` and `/api/admin`. What remains is the frontend (phase 6),
+deployment (7) and the domain split (8).
 
 Every one of those is checked against the deployed Lambda handler by the contract suite —
 `npm run contract:verify`. That gate, not the unit tests, is what makes the port safe.
@@ -50,6 +51,7 @@ docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}' 
 | `npm run build` | `nest build` → `apps/api/dist` |
 | `npm test` | Vitest unit tests (`*.spec.ts` under `apps/api/src`) |
 | `npm run test:e2e` | Vitest e2e tests (`*.e2e-spec.ts` under `apps/api/test`) |
+| `npm run typecheck` | `tsc --noEmit` over src **and** specs — `nest build` skips specs |
 | `npm run schema:verify` | **Schema parity gate** — see below |
 | `npm run contract:verify` | **Endpoint parity gate** — see below |
 
@@ -120,6 +122,7 @@ apps/
 │       ├── events/         /api/events + /api/schools/:id/classes/:id/events
 │       ├── feedback/       /api/feedback, behind a per-request feature flag
 │       ├── photos/         /api/photos + /api/users/:id/photo|gallery, and the S3 client
+│       ├── admin/          /api/admin — user administration, roster import
 │       ├── email/          SES + the password-reset dispatcher
 │       ├── tokens/         reset and verification token minting
 │       └── health/         /pulse
@@ -162,11 +165,15 @@ the root; target one with `--workspace @classyear/api`.
 - **Errors are always `{ "error": "..." }`.** `AllExceptionsFilter` guarantees it, because
   the frontend reads `err.response.data.error` and Nest's default body would make every
   server-side message vanish from the UI.
-- **Per-class authorization is a service, not a guard.** `ClassScopeService` answers "may
-  this user moderate this comment / manage this event / manage or view these photos",
-  because the answer depends on rows the request does not carry. Its methods deliberately
-  source roles differently — comment moderation re-reads the user, the rest trust the token
-  — matching the source; see §16 of the doc.
+- **Per-class authorization is a service, not a guard.** `ClassScopeService`'s five
+  predicates answer "may this user moderate this comment / manage this event / manage or
+  view these photos / manage this user", because the answer depends on rows the request
+  does not carry. They deliberately source roles differently — comment moderation re-reads
+  the user, the rest trust the token — matching the source; see §16 and §18.
+- **Admin guard levels vary per route, deliberately.** Most of `/api/admin` is
+  `SuperAdminGuard`, but `DELETE /users/:userId` accepts class admins, and two routes are
+  behind nothing but a valid token with `ClassScopeService` doing all the gating. §18 has
+  the table.
 - **Module import order in `app.module.ts` is deliberate.** `CommentsModule` and
   `PhotosModule` both mount routes under `/api/users`, so they follow `UsersModule`. §5.3
   explains what breaks otherwise.

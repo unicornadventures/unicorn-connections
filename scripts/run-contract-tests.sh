@@ -35,6 +35,9 @@ export PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER="$DB_USER" PGPASSWORD="$DB_PAS
 export JWT_SECRET="${JWT_SECRET:-contract-test-secret}"
 export NODE_ENV=test
 export FEEDBACK_ENABLED=true
+# Both sides embed this in registration and password-setup links, so it must be
+# pinned rather than left to each one's default.
+export FRONTEND_URL="${FRONTEND_URL:-http://localhost:5173}"
 # Unset so EmailService logs instead of calling SES, and forgot-password sends
 # inline instead of reaching for a queue that does not exist locally.
 unset SES_FROM_EMAIL PASSWORD_RESET_QUEUE_URL ADMIN_SEED_PASSWORD_PARAM || true

@@ -31,6 +31,8 @@ afterAll(async () => {
 
 const asActive = () => authAs(FIXTURE.activeUser);
 const asAdmin = () => authAs({ ...FIXTURE.adminUser, is_admin: true });
+const asClassAdmin = () =>
+  authAs({ ...FIXTURE.classAdminUser, is_class_admin: true });
 
 describe('GET /api/classes', () => {
   it('matches, newest year first', async () => {
@@ -348,5 +350,291 @@ describe('GET /api/classes/:classId/photos', () => {
 
     expect(b).toEqual(a);
     expect(a).toEqual({ status: 200, body: { photos: [] } });
+  });
+});
+
+// ---- phase 5: /api/admin/schools/:schoolId/classes --------------------------
+
+describe('POST /api/admin/schools/:schoolId/classes', () => {
+  /** The body carries a *year*, not a class id — classes are global rows. */
+  it('links an existing class year to a school', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.createClassHandler,
+      {
+        method: 'post',
+        path: `/api/admin/schools/${FIXTURE.emptySchool.id}/classes`,
+        pathParameters: { schoolId: String(FIXTURE.emptySchool.id) },
+        headers: asAdmin(),
+        body: { year: FIXTURE.class.year },
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 201,
+      body: { class: { id: FIXTURE.class.id, year: FIXTURE.class.year } },
+    });
+  });
+
+  it('409s when the year is already linked', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.createClassHandler,
+      {
+        method: 'post',
+        path: `/api/admin/schools/${FIXTURE.school.id}/classes`,
+        pathParameters: { schoolId: String(FIXTURE.school.id) },
+        headers: asAdmin(),
+        body: { year: FIXTURE.class.year },
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 409,
+      body: {
+        error: `Class year ${FIXTURE.class.year} is already linked to this school.`,
+      },
+    });
+  });
+
+  it('404s for a year with no class row', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.createClassHandler,
+      {
+        method: 'post',
+        path: `/api/admin/schools/${FIXTURE.school.id}/classes`,
+        pathParameters: { schoolId: String(FIXTURE.school.id) },
+        headers: asAdmin(),
+        body: { year: 1066 },
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 404,
+      body: { error: 'Class year 1066 not found.' },
+    });
+  });
+
+  it('404s for an unknown school', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.createClassHandler,
+      {
+        method: 'post',
+        path: '/api/admin/schools/9999/classes',
+        pathParameters: { schoolId: '9999' },
+        headers: asAdmin(),
+        body: { year: FIXTURE.class.year },
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({ status: 404, body: { error: 'School not found.' } });
+  });
+
+  it('matches on a missing year', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.createClassHandler,
+      {
+        method: 'post',
+        path: `/api/admin/schools/${FIXTURE.school.id}/classes`,
+        pathParameters: { schoolId: String(FIXTURE.school.id) },
+        headers: asAdmin(),
+        body: {},
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 400,
+      body: { error: 'School ID and year are required.' },
+    });
+  });
+
+  it('refuses a class admin', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.createClassHandler,
+      {
+        method: 'post',
+        path: `/api/admin/schools/${FIXTURE.emptySchool.id}/classes`,
+        pathParameters: { schoolId: String(FIXTURE.emptySchool.id) },
+        headers: asClassAdmin(),
+        body: { year: FIXTURE.class.year },
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(403);
+  });
+});
+
+describe('POST /api/admin/schools/:schoolId/classes/bulk', () => {
+  it('links every year from startYear to now, and returns the full list', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.bulkLinkClassesHandler,
+      {
+        method: 'post',
+        path: `/api/admin/schools/${FIXTURE.emptySchool.id}/classes/bulk`,
+        pathParameters: { schoolId: String(FIXTURE.emptySchool.id) },
+        headers: asAdmin(),
+        body: { startYear: FIXTURE.class.year },
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(201);
+    // The fixture seeds 1994, 1995 and the current year; all three are in range.
+    expect((a as any).body.classes.map((c: any) => c.year)).toEqual([
+      FIXTURE.currentClass.year,
+      FIXTURE.otherClass.year,
+      FIXTURE.class.year,
+    ]);
+  });
+
+  /** ON CONFLICT DO NOTHING, so re-running links only the gap. */
+  it('is idempotent against an already-linked school', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.bulkLinkClassesHandler,
+      {
+        method: 'post',
+        path: `/api/admin/schools/${FIXTURE.school.id}/classes/bulk`,
+        pathParameters: { schoolId: String(FIXTURE.school.id) },
+        headers: asAdmin(),
+        body: { startYear: FIXTURE.class.year },
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(201);
+  });
+
+  it('rejects a startYear before 1950', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.bulkLinkClassesHandler,
+      {
+        method: 'post',
+        path: `/api/admin/schools/${FIXTURE.school.id}/classes/bulk`,
+        pathParameters: { schoolId: String(FIXTURE.school.id) },
+        headers: asAdmin(),
+        body: { startYear: 1949 },
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(400);
+    expect((a as any).body.error).toContain('startYear must be between 1950');
+  });
+
+  it('rejects a startYear in the future', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.bulkLinkClassesHandler,
+      {
+        method: 'post',
+        path: `/api/admin/schools/${FIXTURE.school.id}/classes/bulk`,
+        pathParameters: { schoolId: String(FIXTURE.school.id) },
+        headers: asAdmin(),
+        body: { startYear: new Date().getFullYear() + 1 },
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(400);
+  });
+});
+
+describe('DELETE /api/admin/schools/:schoolId/classes/:classId', () => {
+  it('unlinks without deleting the members by default', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.deleteClassHandler,
+      {
+        method: 'delete',
+        path: `/api/admin/schools/${FIXTURE.school.id}/classes/${FIXTURE.class.id}`,
+        pathParameters: {
+          schoolId: String(FIXTURE.school.id),
+          classId: String(FIXTURE.class.id),
+        },
+        headers: asAdmin(),
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 200,
+      body: { message: 'Class unlinked from school successfully.' },
+    });
+  });
+
+  it('deletes the members too with ?cascadeUsers=true', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.deleteClassHandler,
+      {
+        method: 'delete',
+        path: `/api/admin/schools/${FIXTURE.school.id}/classes/${FIXTURE.class.id}`,
+        pathParameters: {
+          schoolId: String(FIXTURE.school.id),
+          classId: String(FIXTURE.class.id),
+        },
+        query: { cascadeUsers: 'true' },
+        headers: asAdmin(),
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(200);
+  });
+
+  /** Only the exact literal is destructive — not `1`, not `TRUE`. */
+  it('treats any other cascadeUsers value as false', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.deleteClassHandler,
+      {
+        method: 'delete',
+        path: `/api/admin/schools/${FIXTURE.school.id}/classes/${FIXTURE.class.id}`,
+        pathParameters: {
+          schoolId: String(FIXTURE.school.id),
+          classId: String(FIXTURE.class.id),
+        },
+        query: { cascadeUsers: 'TRUE' },
+        headers: asAdmin(),
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(200);
+  });
+
+  it('404s when the class is not linked to that school', async () => {
+    const { legacy: a, nest: b } = await compare(
+      app,
+      legacy.deleteClassHandler,
+      {
+        method: 'delete',
+        path: `/api/admin/schools/${FIXTURE.emptySchool.id}/classes/${FIXTURE.class.id}`,
+        pathParameters: {
+          schoolId: String(FIXTURE.emptySchool.id),
+          classId: String(FIXTURE.class.id),
+        },
+        headers: asAdmin(),
+      },
+    );
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 404,
+      body: { error: 'Class is not linked to this school.' },
+    });
   });
 });

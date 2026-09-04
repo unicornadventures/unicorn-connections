@@ -327,3 +327,162 @@ describe('DELETE /api/events/:eventId', () => {
     expect(a).toEqual({ status: 404, body: { error: 'Event not found.' } });
   });
 });
+
+// ---- phase 5: POST /api/admin/schools/:schoolId/classes/:classId/events -----
+
+describe('POST /api/admin/schools/:schoolId/classes/:classId/events', () => {
+  const path = `/api/admin/schools/${FIXTURE.school.id}/classes/${FIXTURE.class.id}/events`;
+  const pathParameters = {
+    schoolId: String(FIXTURE.school.id),
+    classId: String(FIXTURE.class.id),
+  };
+
+  it('creates an event', async () => {
+    const { legacy: a, nest: b } = await compare(app, legacy.createEventHandler, {
+      method: 'post',
+      path,
+      pathParameters,
+      headers: asAdmin(),
+      body: {
+        title: 'Homecoming',
+        event_date: '2031-09-20T19:00:00.000Z',
+        location: 'The Field',
+        description: 'Bring a dish.',
+      },
+    });
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(201);
+    expect((a as any).body.event).toMatchObject({
+      title: 'Homecoming',
+      event_date: '2031-09-20',
+      event_time: '19:00:00',
+    });
+  });
+
+  /**
+   * The only admin route a class admin can reach — it is guarded by
+   * `canManageEvent`, not by an `is_admin` check.
+   */
+  it('lets a class admin create for their own class', async () => {
+    const { legacy: a, nest: b } = await compare(app, legacy.createEventHandler, {
+      method: 'post',
+      path: `/api/admin/schools/${FIXTURE.school.id}/classes/${FIXTURE.otherClass.id}/events`,
+      pathParameters: {
+        schoolId: String(FIXTURE.school.id),
+        classId: String(FIXTURE.otherClass.id),
+      },
+      headers: asClassAdmin(),
+      body: {
+        title: 'Class of 95 Meetup',
+        event_date: '2031-05-01T18:00:00.000Z',
+        location: 'The Diner',
+      },
+    });
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(201);
+  });
+
+  it('refuses a class admin for a class they are not in', async () => {
+    const { legacy: a, nest: b } = await compare(app, legacy.createEventHandler, {
+      method: 'post',
+      path,
+      pathParameters,
+      headers: asClassAdmin(),
+      body: {
+        title: 'Wrong class',
+        event_date: '2031-05-01T18:00:00.000Z',
+        location: 'Nowhere',
+      },
+    });
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 403,
+      body: {
+        error: 'Access denied. You can only manage events for your class.',
+      },
+    });
+  });
+
+  it('refuses an ordinary member of the class', async () => {
+    const { legacy: a, nest: b } = await compare(app, legacy.createEventHandler, {
+      method: 'post',
+      path,
+      pathParameters,
+      headers: asActive(),
+      body: {
+        title: 'Unauthorised',
+        event_date: '2031-05-01T18:00:00.000Z',
+        location: 'Nowhere',
+      },
+    });
+
+    expect(b).toEqual(a);
+    expect((a as any).status).toBe(403);
+  });
+
+  /**
+   * Validation runs *before* authorization here, the opposite of update and
+   * delete. A member with no rights and an incomplete body gets the 400.
+   */
+  it('reports missing fields before checking authorization', async () => {
+    const { legacy: a, nest: b } = await compare(app, legacy.createEventHandler, {
+      method: 'post',
+      path,
+      pathParameters,
+      headers: asActive(),
+      body: { title: 'No date' },
+    });
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 400,
+      body: { error: 'schoolId, classId, title, and event_date are required.' },
+    });
+  });
+
+  it('404s when the class is not linked to that school', async () => {
+    const { legacy: a, nest: b } = await compare(app, legacy.createEventHandler, {
+      method: 'post',
+      path: `/api/admin/schools/${FIXTURE.emptySchool.id}/classes/${FIXTURE.class.id}/events`,
+      pathParameters: {
+        schoolId: String(FIXTURE.emptySchool.id),
+        classId: String(FIXTURE.class.id),
+      },
+      headers: asAdmin(),
+      body: {
+        title: 'Orphan',
+        event_date: '2031-05-01T18:00:00.000Z',
+        location: 'Nowhere',
+      },
+    });
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 404,
+      body: { error: 'Class is not linked to this school.' },
+    });
+  });
+
+  /**
+   * `location` is optional on the wire but NOT NULL in the schema, so omitting
+   * it fails the INSERT and 500s. Preserved bug-for-bug; docs §18.
+   */
+  it('500s identically when location is omitted', async () => {
+    const { legacy: a, nest: b } = await compare(app, legacy.createEventHandler, {
+      method: 'post',
+      path,
+      pathParameters,
+      headers: asAdmin(),
+      body: { title: 'No location', event_date: '2031-05-01T18:00:00.000Z' },
+    });
+
+    expect(b).toEqual(a);
+    expect(a).toEqual({
+      status: 500,
+      body: { error: 'Internal server error.' },
+    });
+  });
+});

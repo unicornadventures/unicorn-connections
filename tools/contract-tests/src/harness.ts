@@ -73,7 +73,15 @@ export async function invokeNest(
  * Everything else is compared exactly. Resisting the urge to normalize more
  * than this is the whole point — each added exclusion is parity given up.
  */
-const VOLATILE = new Set(['token', 'created_at', 'updated_at', 'timestamp']);
+const VOLATILE = new Set([
+  'token',
+  'created_at',
+  'updated_at',
+  'timestamp',
+  // Admin-minted password links expire seven days from *now*, so the two sides
+  // differ by however long the first call took.
+  'expiresAt',
+]);
 
 /**
  * A presigned S3 URL carries `X-Amz-Date` and a signature derived from it, so
@@ -111,9 +119,23 @@ function normalizePhotoKeySuffix(value: string): string {
   );
 }
 
+/**
+ * Password-setup links carry 32 random bytes, so the two sides never match.
+ *
+ * Only the token is masked; the origin and path stay compared, which is what
+ * matters — a link pointing at the wrong host or the wrong page would still
+ * fail. The token's *correctness* is not this comparison's job anyway, since
+ * neither side's token can be verified against the other's database state.
+ */
+function normalizeSetupToken(value: string): string {
+  return value.replace(/([?&]token=)[0-9a-f]{16,}/g, '$1<token>');
+}
+
 export function normalize(value: unknown): unknown {
   if (typeof value === 'string') {
-    return normalizePhotoKeySuffix(normalizePresignedUrl(value));
+    return normalizeSetupToken(
+      normalizePhotoKeySuffix(normalizePresignedUrl(value)),
+    );
   }
 
   if (Array.isArray(value)) return value.map(normalize);

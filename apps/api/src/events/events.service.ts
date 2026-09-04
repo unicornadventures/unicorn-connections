@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -117,6 +118,58 @@ export class EventsService {
       await this.repo.deleteEvent(eventId);
 
       return { message: 'Event deleted successfully.' };
+    } catch (error) {
+      rethrowAsInternal(error, 'Internal server error.', this.logger);
+    }
+  }
+
+  /**
+   * `POST /api/admin/schools/:schoolId/classes/:classId/events`.
+   *
+   * Validation runs before authorization here, which is the opposite of the
+   * update and delete above — the source checks its four required fields first
+   * and only then asks whether the caller may manage the class. So a member
+   * with no rights who posts an incomplete body gets the 400, not the 403.
+   * Faithful, and pinned by a contract test.
+   *
+   * `location` is optional on the wire but NOT NULL in the schema, so omitting
+   * it makes the INSERT fail and the request 500. Another one the source has;
+   * see docs §18.
+   */
+  async createEvent(
+    schoolId: string,
+    classId: string,
+    body: UpdateEventDto,
+    authUser: AuthUser,
+  ) {
+    try {
+      const { title, description, event_date, location } = body;
+
+      if (!schoolId || !classId || !title || !event_date) {
+        throw new BadRequestException({
+          error: 'schoolId, classId, title, and event_date are required.',
+        });
+      }
+
+      await this.assertCanManage(authUser, classId);
+
+      if (!(await this.repo.isClassLinkedToSchool(classId, schoolId))) {
+        throw new NotFoundException({
+          error: 'Class is not linked to this school.',
+        });
+      }
+
+      const { date, time } = this.splitDateTime(event_date);
+
+      const event = await this.repo.createEvent(classId, schoolId, {
+        title,
+        description: description || null,
+        eventDate: date,
+        eventTime: time,
+        location: location || null,
+      });
+
+      return { event };
     } catch (error) {
       rethrowAsInternal(error, 'Internal server error.', this.logger);
     }

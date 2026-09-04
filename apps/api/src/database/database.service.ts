@@ -28,7 +28,17 @@ const INVALID_PASSWORD = '28P01';
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
-  private pool: PoolType | null = null;
+  /**
+   * The in-flight *promise*, not the resolved pool.
+   *
+   * Caching the resolved value would leave an `await` between the "do we have
+   * one?" check and the assignment, so two concurrent first queries would each
+   * build a Pool and the loser's would leak — never assigned, never `end()`ed,
+   * holding its connections until they idled out. Any handler that issues two
+   * queries with `Promise.all` triggers it on the first request after boot,
+   * which under Lambda means once per cold start.
+   */
+  private pool: Promise<PoolType> | null = null;
   private readonly config: DatabaseConfig;
 
   constructor(configService: ConfigService) {
@@ -56,12 +66,23 @@ export class DatabaseService implements OnModuleDestroy {
     return { user: secret.username, password: secret.password };
   }
 
-  private async getPool(): Promise<PoolType> {
-    if (this.pool) return this.pool;
+  /**
+   * Assigns the promise synchronously, before the first `await`, so concurrent
+   * callers all receive the same one. On failure the slot is cleared so the
+   * next caller retries rather than inheriting a rejected promise forever.
+   */
+  private getPool(): Promise<PoolType> {
+    this.pool ??= this.createPool().catch((error: unknown) => {
+      this.pool = null;
+      throw error;
+    });
+    return this.pool;
+  }
 
+  private async createPool(): Promise<PoolType> {
     const { user, password } = await this.resolveCredentials();
 
-    this.pool = new Pool({
+    const pool = new Pool({
       user,
       password,
       host: this.config.host,
@@ -74,14 +95,14 @@ export class DatabaseService implements OnModuleDestroy {
       idleTimeoutMillis: 30000,
     });
 
-    this.pool.on('connect', () =>
+    pool.on('connect', () =>
       this.logger.log('Connected to PostgreSQL database.'),
     );
-    this.pool.on('error', (err: Error) =>
+    pool.on('error', (err: Error) =>
       this.logger.error(`Unexpected error on idle database client: ${err.message}`),
     );
 
-    return this.pool;
+    return pool;
   }
 
   async query<T extends QueryResultRow = any>(
@@ -101,7 +122,7 @@ export class DatabaseService implements OnModuleDestroy {
         this.pool = null;
         // Don't await — a pool whose credentials are rejected has no usable
         // connections to drain, and end() can hang waiting for one.
-        void stale?.end().catch(() => {});
+        void stale?.then((p) => p.end()).catch(() => {});
         const fresh = await this.getPool();
         return fresh.query<T>(text, params);
       }
@@ -112,6 +133,6 @@ export class DatabaseService implements OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     const pool = this.pool;
     this.pool = null;
-    await pool?.end().catch(() => {});
+    await pool?.then((p) => p.end()).catch(() => {});
   }
 }
