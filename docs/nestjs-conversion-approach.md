@@ -2,8 +2,8 @@
 
 **Target directory:** `/Users/crgdncn/Code/ClassYearNest`
 **Source of truth (read-only):** `/Users/crgdncn/Code/ClassYear`
-**Status:** phase 5 complete (2026-09-03) — the API surface is done. §13 phase 0, §14 the
-contract decision, §15–§18 phases 2–5. Remaining: frontend (6), deploy (7), domains (8).
+**Status:** phase 6 complete (2026-09-04) — API and web client both done. §13 phase 0, §14
+the contract decision, §15–§19 phases 2–6. Remaining: deploy (7), domain split (8).
 **Written:** 2026-09-03
 
 > The existing ClassYear repo is the behavioural spec: every decision below is stated in
@@ -719,7 +719,7 @@ Each phase ends at a green gate. Nothing merges past a red contract test.
 | **3** ✅ | `CommentsModule` (both mounts), `EventsModule`, `FeedbackModule` | Contract tests green; feature flag verified in both states — see §16 |
 | **4** ✅ | `PhotosModule` + S3 (**no multipart — none is deployed, §17**) | Upload/delete verified against a real object store; binary handling n/a — see §17 |
 | **5** ✅ | `AdminModule` + `adminSchools`/`adminClasses`/`adminEvents` incl. CSV import + bulk link | Full contract suite green — see §18 |
-| **6** | Frontend: copy `frontend/` across, point `VITE_API_BASE_URL` at the Nest server | Vitest + Playwright e2e green against Nest |
+| **6** ✅ | Frontend: copy `frontend/` across, point `VITE_API_BASE_URL` at the Nest server | Vitest + Playwright green; a live-API smoke suite covers the "against Nest" half — see §19 |
 | **7** | Deployment: minimal SAM template, single proxy function, warmer, email worker; new stack `classyear-nest`, own Aurora cluster, served at `nest.reunion-connect.org` (§8.6) | Smoke test against deployed stack; **both** live domains still served by the old app |
 | **8** | Domain split (§8.6): verify SES identity for `noreply@unicornconnections.org` → old stack drops to `unicornconnections.org` only → new stack claims `reunion-connect.org` + `www` | `unicornconnections.org` serves the old app, `reunion-connect.org` serves the new app, both HTTP 200 with valid certs; password reset sends correctly from both |
 | **9** | *Later, optional, separately approved* — move `unicornconnections.org` to the new app too and retire the old stack | — |
@@ -1415,3 +1415,136 @@ clean and ran anyway, because Vitest transpiles without checking types.
 - `GET /api/auth/me` and `/logout` are ported but unused by the app; `/verify-email`
   is ported and **fixes** a broken production feature (§14). Worth a manual
   check once the frontend is wired up.
+
+---
+
+## 19. Phase 6 — done (2026-09-04)
+
+The web client moved into `apps/web`, adopted `@classyear/shared-types`, and now
+runs against the ported API.
+
+### Gate
+
+| Gate | Result |
+|---|---|
+| Vitest | ✅ 25 tests, 4 files |
+| Playwright | ✅ **300 passed** across chromium, firefox, webkit, Mobile Chrome |
+| Playwright *against Nest* | ✅ `npm run smoke:web` — 3 live-API tests, no mocks |
+| Everything else still green | ✅ contract 240, schema 78 zero diff, unit 221, e2e 3, typecheck clean |
+
+### The gate needed a second half
+
+§10 phrased this phase's gate as "Vitest + Playwright e2e green **against Nest**".
+The Playwright suite cannot satisfy that as written: **every spec mocks the API
+with `page.route`**. It would pass identically against a backend that does not
+exist. Useful for testing the client's own logic, worthless as evidence the port
+works.
+
+So the gate is met in two parts. The mocked suite proves the move broke nothing,
+and a new `e2e/live-api.spec.ts` — skipped unless `E2E_LIVE_API=1` — logs in
+with real credentials against a real server. `scripts/smoke-web.sh` boots the
+API, seeds one school, one class and one member, and runs it. It covers a
+successful login, a rejected one, and the directory rendering from real rows.
+
+The rejected-login case earns its place: `Login.tsx` renders
+`err.response.data.error`, so it is the only test anywhere that proves
+`AllExceptionsFilter`'s envelope is the shape the client actually reads. Every
+contract test asserts that shape against the *source*; this one asserts the
+client can consume it.
+
+### The frontend had never been type-checked
+
+The source `frontend/` shipped with **no `tsconfig.json` and no typecheck
+script**. Vite strips types with esbuild and never checks them, so nothing had
+ever verified a single annotation in ~47 files.
+
+Adding one surfaced **72 errors**, and the distribution is the argument for
+§3.4 in one line: **61 of them were `Property 'user_id' does not exist on type
+'CurrentUser'`**. The API returns `user_id`, `Login.tsx` writes it, sixty-one
+call sites read it, and only the type declaration disagreed. Exactly the drift
+the shared package exists to prevent, sitting in the codebase unnoticed because
+nothing was looking.
+
+Two were not staleness but live bugs:
+
+1. **`setActivePanel` is not defined.** Called in two `onChange` handlers in
+   `UsersManager.tsx` — the admin user manager's school and class-year filters —
+   with no `useState`, no import, nothing. Changing either filter throws a
+   `ReferenceError` in production today. The surrounding state updates are
+   queued first so the filter appears to work, but the handler still throws. The
+   calls are removed; there is no panel state for them to reset.
+2. **`EventsManager` submits with a null school.** Its guard checked
+   `selectedClassId` but not `selectedSchoolId`, so submitting before picking a
+   school would have built `/api/admin/schools/null/classes/…`. Added to the
+   guard.
+
+Both are frontend bugs with no contract implication, so §9's "preserve deployed
+behaviour" does not apply — a `ReferenceError` is not a contract. Fixed, and
+recorded here.
+
+### Types: one definition, two views
+
+The obstacle to simply importing `@classyear/shared-types` is that it describes
+**database rows**, where timestamps are `Date`. By the time a row reaches the
+browser it has been through `JSON.stringify` and they are strings. Both are
+true, and restating the field list to say so is the very duplication being
+removed.
+
+`Serialized<T>` resolves it — a mapped type that recursively rewrites `Date` to
+`string`. `apps/web/src/types.ts` now derives every entity from the shared
+definition, and keeps only what is genuinely client-side: response envelopes,
+`SlideshowPhoto`, `CurrentUser`.
+
+Three findings fell out of doing it:
+
+- **`CurrentUser.profile` is not always a whole profile.** `login` returns the
+  full row; `claim-account` returns first and last name only. Both mint a
+  session. It is typed `Partial<Profile>`, which is the honest shape — the
+  previous `Profile` was a lie that happened to compile.
+- **`created_at` is optional on `CurrentUser`.** §14 noted `Login.tsx` reads a
+  field the deployed handler never sends. The type now says so.
+- **Two components declared near-identical local `LinkedClass` / `ClassYear`
+  types.** Both are `GET /api/schools/:id/classes` rows; they are now one
+  `SchoolClass`.
+
+`AVATAR_COLORS` moved to the shared package as well — the API validates against
+it and the client renders it, and the source kept a copy on each side.
+
+### Seven pre-existing e2e failures, and how that was established
+
+The suite failed 7 of 75 after the move. Rather than assume the port caused it,
+the same suite was run in the **source repo**: 68 passed, 7 failed, *the same
+seven*. No regression. (Getting that baseline meant installing a Playwright
+browser build the source's own version needed and the machine did not have —
+worth noting that the source's e2e suite could not run here at all until then.)
+
+All seven were stale tests, now fixed:
+
+- Three asserted `getByRole('link', { name: 'Help' })`, which matches both the
+  header link and an inline "help page" link in body copy. Scoped to the header.
+  Scoping to `navigation` fixed desktop and broke all four mobile projects,
+  because the `<nav>` is `hidden md:flex` and the mobile menu sits outside it —
+  `banner` is the landmark that contains both.
+- Two asserted copy that had since changed (`"4 classmates registered"` vs
+  `"4 classmates · …"`, `"Share your thoughts..."` vs `"Share your message..."`).
+- Two asserted a compose form on `/comments`, which lists your own comments and
+  has never had one. Composing happens on another member's profile. One was
+  retargeted there; the other's stray assertion was dropped.
+
+That last pair is the only place this phase rewrote test *intent* rather than
+test *detail*, and it is called out here because that is a judgement someone
+else might make differently.
+
+### Notes for phase 7
+
+- **CORS is enabled in `main.ts`, not `bootstrap.ts`.** The Lambda entry point
+  will not inherit it. §6 wants uniform CORS under the single proxy function;
+  move the `enableCors` call into `configureApp` when `lambda.ts` is written.
+- `VITE_API_BASE_URL=/api` is what ships: behind CloudFront the SPA and the API
+  share a domain, so the relative form needs no CORS at all. The absolute form
+  exists for local development and is what `src/api.ts` falls back to.
+- The web build emits an 815 kB main chunk. Not a blocker, and not this port's
+  problem to solve, but worth a `manualChunks` pass before anyone measures cold
+  page loads.
+- `npm run typecheck` now covers all three workspaces. It is not part of
+  `npm test`; wire both into CI in phase 7.

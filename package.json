@@ -17,6 +17,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "schema:verify": "./scripts/verify-schema-parity.sh",
     "contract:verify": "./scripts/run-contract-tests.sh",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "smoke:web": "./scripts/smoke-web.sh"
   }
 }

@@ -10,3 +10,9 @@ coverage/
 tmp/
 tools/legacy-schema/schema.ts
 *.tsbuildinfo
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

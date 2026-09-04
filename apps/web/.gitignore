@@ -1,0 +1,12 @@
+# Most of this is covered by the repo-root .gitignore; kept here for the
+# web-specific artifacts (Vite cache, Playwright reports) so the app is still
+# self-contained if it ever moves.
+dist/
+build/
+.vite/
+.cache/
+
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

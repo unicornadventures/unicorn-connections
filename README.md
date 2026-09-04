@@ -4,10 +4,10 @@ A NestJS port of the [ClassYear](../ClassYear) class-reunion platform. The conve
 including the full endpoint inventory and the phased migration, lives in
 [`docs/nestjs-conversion-approach.md`](docs/nestjs-conversion-approach.md).
 
-**Status: phase 5 complete — the API surface is done.** 64 endpoints across `/pulse`,
+**Status: phase 6 complete — API and web client both done.** 64 endpoints across `/pulse`,
 `/api/auth`, `/api/users`, `/api/schools`, `/api/classes`, `/api/comments`, `/api/events`,
-`/api/feedback`, `/api/photos` and `/api/admin`. What remains is the frontend (phase 6),
-deployment (7) and the domain split (8).
+`/api/feedback`, `/api/photos` and `/api/admin`, plus the React SPA in `apps/web`. What
+remains is deployment (phase 7) and the domain split (8).
 
 Every one of those is checked against the deployed Lambda handler by the contract suite —
 `npm run contract:verify`. That gate, not the unit tests, is what makes the port safe.
@@ -52,6 +52,7 @@ docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}' 
 | `npm test` | Vitest unit tests (`*.spec.ts` under `apps/api/src`) |
 | `npm run test:e2e` | Vitest e2e tests (`*.e2e-spec.ts` under `apps/api/test`) |
 | `npm run typecheck` | `tsc --noEmit` over src **and** specs — `nest build` skips specs |
+| `npm run smoke:web` | **Live-API gate** — drives the SPA against a real Nest server |
 | `npm run schema:verify` | **Schema parity gate** — see below |
 | `npm run contract:verify` | **Endpoint parity gate** — see below |
 
@@ -126,7 +127,9 @@ apps/
 │       ├── email/          SES + the password-reset dispatcher
 │       ├── tokens/         reset and verification token minting
 │       └── health/         /pulse
-└── web/                    @classyear/web — React SPA (phase 6, placeholder)
+└── web/                    @classyear/web — React 18 + Vite 5 + Tailwind 3 SPA
+    ├── src/                components, apiClient.ts, AppContext.tsx
+    └── e2e/                Playwright; all mocked except live-api.spec.ts
 packages/
 └── shared-types/           @classyear/shared-types — entity types for api + web
 tools/
@@ -135,7 +138,8 @@ tools/
 infra/                      SAM template and deploy scripts (phase 7, placeholder)
 scripts/
 ├── verify-schema-parity.sh
-└── run-contract-tests.sh
+├── run-contract-tests.sh
+└── smoke-web.sh
 docs/
 └── nestjs-conversion-approach.md
 ```
@@ -177,6 +181,12 @@ the root; target one with `--workspace @classyear/api`.
 - **Module import order in `app.module.ts` is deliberate.** `CommentsModule` and
   `PhotosModule` both mount routes under `/api/users`, so they follow `UsersModule`. §5.3
   explains what breaks otherwise.
+- **The web client's entity types are derived, not restated.** `Serialized<T>` in
+  `@classyear/shared-types` maps a row type's `Date` fields to the `string` they become over
+  the wire, so one definition serves both sides. The source restated them by hand and they
+  had drifted — 61 call sites read a `user_id` the type never declared. See §19.
+- **The Playwright suite mocks every API call** except `e2e/live-api.spec.ts`. It would pass
+  against no backend at all, which is why `npm run smoke:web` exists.
 - **Nothing uploads through the API.** Photo uploads are presigned S3 PUTs the browser
   performs directly; the API mints the URL and records the key. There is no multipart
   handling anywhere, and phase 7 needs no API Gateway binary configuration — see §17.

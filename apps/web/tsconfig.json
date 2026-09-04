@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "_comment": "The source frontend shipped with no tsconfig at all — Vite strips types with esbuild and never checks them, so this code had never been type-checked before the port. `npm run typecheck` is what makes @classyear/shared-types actually binding rather than decorative.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"],
+
+    // Vite resolves bare and aliased specifiers itself; the repo-wide
+    // `nodenext` would demand `.js` extensions on relative imports, which is
+    // not the idiom this app is written in.
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolvePackageJsonExports": true,
+    "allowImportingTsExtensions": false,
+
+    // Nothing is emitted — Vite builds. This config exists only to check.
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*", "e2e/**/*", "*.config.ts"]
+}

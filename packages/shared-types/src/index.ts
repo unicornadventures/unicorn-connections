@@ -158,3 +158,69 @@ export interface JwtPayload {
   iat?: number;
   exp?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Wire types
+// ---------------------------------------------------------------------------
+
+/**
+ * The JSON view of a row type: every `Date` becomes the ISO `string` it
+ * serializes to.
+ *
+ * The types above describe **database rows**, where timestamps are `Date`
+ * objects handed back by node-postgres. By the time the same row reaches a
+ * browser it has been through `JSON.stringify`, so those fields are strings.
+ * Both facts are true, and neither package should have to restate the field
+ * list to express the difference — that restating is exactly the drift §3.4
+ * exists to remove.
+ *
+ * ```ts
+ * type ApiSchool = Serialized<School>;   // created_at: string
+ * ```
+ *
+ * Recurses through arrays and nested objects, and deliberately leaves
+ * functions alone.
+ */
+export type Serialized<T> = T extends Date
+  ? string
+  : T extends (infer U)[]
+    ? Serialized<U>[]
+    : T extends object
+      ? { [K in keyof T]: Serialized<T[K]> }
+      : T;
+
+// ---------------------------------------------------------------------------
+// Shared constants
+// ---------------------------------------------------------------------------
+
+/**
+ * The palette a user can pick from for their profile circle, used when they
+ * have no photo.
+ *
+ * Shared rather than duplicated because it is enforced on **both** sides:
+ * `PUT /api/users/:userId/profile` rejects anything outside this list with
+ * 400 'Invalid avatar color.', and the web client renders the same swatches.
+ * The source kept two copies — `backend/src/utils/avatarColors.ts` and
+ * `frontend/src/avatarColors.ts` — which is the pattern this package exists to
+ * end. The values and their order are part of the API contract.
+ */
+export const AVATAR_COLORS = [
+  '#E91E63',
+  '#3F51B5',
+  '#009688',
+  '#FF5722',
+  '#9C27B0',
+  '#4CAF50',
+  '#FF9800',
+  '#607D8B',
+  '#795548',
+  '#00BCD4',
+  '#F06292',
+  '#7986CB',
+] as const;
+
+export type AvatarColor = (typeof AVATAR_COLORS)[number];
+
+export const isValidAvatarColor = (color: unknown): color is AvatarColor =>
+  typeof color === 'string' &&
+  (AVATAR_COLORS as readonly string[]).includes(color);
