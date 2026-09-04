@@ -168,19 +168,34 @@ export class PhotosService {
   }
 
   /**
-   * Mints a viewing URL for an arbitrary key supplied by the caller.
+   * Mints a viewing URL for a key the caller names.
    *
-   * There is **no ownership check** — any authenticated user can presign any
-   * key in the bucket if they can name it. Keys are guessable in principle
-   * (`photos/{school}/{class}/{user}-then-{base36 ms}`), though the timestamp
-   * suffix makes it impractical. Deployed as-is; flagged in docs §9.2 rather
-   * than tightened here, because a fix needs a rule about who may view what and
-   * that is a product decision.
+   * The deployed handler presigns **anything** — any authenticated user could
+   * mint a URL for any object in the bucket if they could name it. That is
+   * §9.2 item 6, approved for fixing in §21: the key's owner is now resolved
+   * from the database and `canViewPhotos` applied, which is the same rule the
+   * gallery listing uses.
+   *
+   * A key that belongs to nobody and a key the caller may not see both answer
+   * 403 with the same message. Distinguishing them would turn this endpoint
+   * into an oracle for which keys exist, which is most of what the ownership
+   * check is here to prevent.
    */
-  async createViewUrl(key: string | undefined) {
+  async createViewUrl(key: string | undefined, authUser: AuthUser) {
     try {
       if (!key) {
         throw new BadRequestException({ error: 'Photo key required.' });
+      }
+
+      const ownerId = await this.repo.findKeyOwner(key);
+      const allowed =
+        ownerId !== undefined &&
+        (await this.scope.canViewPhotos(authUser, ownerId));
+
+      if (!allowed) {
+        throw new ForbiddenException({
+          error: 'You do not have permission to view this photo.',
+        });
       }
 
       return { presignedUrl: await this.s3.resolve(key) };

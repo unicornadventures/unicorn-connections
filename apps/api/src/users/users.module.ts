@@ -3,6 +3,7 @@ import { UsersController } from './users.controller.js';
 import { UsersService } from './users.service.js';
 import { UsersRepository } from './users.repository.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { SuperAdminGuard } from '../common/guards/super-admin.guard.js';
 import { PhotosModule } from '../photos/photos.module.js';
 
 /**
@@ -14,7 +15,7 @@ import { PhotosModule } from '../photos/photos.module.js';
 @Module({
   imports: [PhotosModule],
   controllers: [UsersController],
-  providers: [UsersService, UsersRepository, JwtAuthGuard],
+  providers: [UsersService, UsersRepository, JwtAuthGuard, SuperAdminGuard],
   exports: [UsersService],
 })
 export class UsersModule {}

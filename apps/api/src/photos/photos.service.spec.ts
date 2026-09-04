@@ -356,20 +356,60 @@ describe('PhotosService.createViewUrl', () => {
     const service = serviceWith({});
 
     await expectRejection(
-      service.createViewUrl(undefined),
+      service.createViewUrl(undefined, asUser()),
       400,
       'Photo key required.',
     );
   });
 
-  /** No ownership check — see the service, and §9.2. */
-  it('presigns any key it is handed', async () => {
-    const service = serviceWith({});
+  it('presigns a key the caller may view', async () => {
+    const service = serviceWith(
+      { findKeyOwner: async () => 10 },
+      fakeS3().service,
+      scopeAllowing({ view: true }),
+    );
 
     await expect(
-      service.createViewUrl('photos/9/9/999-then-abc.jpg'),
+      service.createViewUrl('photos/1/1/10-then-abc.jpg', asUser()),
     ).resolves.toEqual({
-      presignedUrl: 'signed:photos/9/9/999-then-abc.jpg',
+      presignedUrl: 'signed:photos/1/1/10-then-abc.jpg',
     });
+  });
+
+  /**
+   * The §9.2 item 6 fix. The deployed handler presigned anything it was handed;
+   * this refuses a key belonging to someone outside the caller's classes.
+   */
+  it('refuses a key the caller may not view', async () => {
+    const service = serviceWith(
+      { findKeyOwner: async () => 999 },
+      fakeS3().service,
+      scopeAllowing({ view: false }),
+    );
+
+    await expectRejection(
+      service.createViewUrl('photos/9/9/999-then-abc.jpg', asUser()),
+      403,
+      'You do not have permission to view this photo.',
+    );
+  });
+
+  /**
+   * Same status and message as an unauthorized key, deliberately: a distinct
+   * 404 would make this endpoint an oracle for which keys exist, which is most
+   * of what the ownership check is preventing.
+   */
+  it('refuses a key that belongs to nobody, indistinguishably', async () => {
+    const service = serviceWith(
+      { findKeyOwner: async () => undefined },
+      fakeS3().service,
+      scopeAllowing({ view: true }),
+    );
+
+    await expectRejection(
+      service.createViewUrl('photos/made/up/key.jpg', asUser()),
+      403,
+      'You do not have permission to view this photo.',
+    );
   });
 });

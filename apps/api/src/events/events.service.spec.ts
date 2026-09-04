@@ -22,6 +22,9 @@ function serviceWith(
   return new EventsService(repo as EventsRepository, scope);
 }
 
+/** Fixed, not `new Date()`: two calls a millisecond apart made this flaky. */
+const FIXED_DATE = new Date('2026-01-01T00:00:00Z');
+
 const row = (over: Partial<EventRow> = {}): EventRow =>
   ({
     id: 1,
@@ -32,8 +35,8 @@ const row = (over: Partial<EventRow> = {}): EventRow =>
     event_date: '2030-06-15',
     event_time: '18:00:00',
     location: 'The Old Hall',
-    created_at: new Date(),
-    updated_at: new Date(),
+    created_at: FIXED_DATE,
+    updated_at: FIXED_DATE,
     timezone: 'America/Chicago',
     ...over,
   }) as EventRow;

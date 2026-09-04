@@ -71,6 +71,26 @@ export class PhotosRepository {
     );
   }
 
+  /**
+   * Which user does this S3 key belong to?
+   *
+   * Resolved from the database rather than by parsing the key. Keys *look*
+   * parseable (`photos/{school}/{class}/{user}-{kind}-{suffix}.jpg`, with an
+   * `other/` fallback), but a caller supplies this string, so trusting its
+   * shape would mean trusting the caller to name their own owner. Three places
+   * can hold a key; a key in none of them has no owner and must be refused.
+   */
+  async findKeyOwner(key: string): Promise<number | undefined> {
+    const result = await this.db.query<{ user_id: number }>(
+      `SELECT user_id FROM profiles WHERE then_photo_url = $1 OR now_photo_url = $1
+       UNION
+       SELECT user_id FROM gallery_photos WHERE s3_key = $1
+       LIMIT 1`,
+      [key],
+    );
+    return result.rows[0]?.user_id;
+  }
+
   async countGalleryPhotos(userId: string): Promise<number> {
     const result = await this.db.query<{ count: string }>(
       'SELECT COUNT(*) FROM gallery_photos WHERE user_id = $1',

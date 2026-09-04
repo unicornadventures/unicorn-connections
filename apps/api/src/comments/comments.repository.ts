@@ -161,10 +161,21 @@ export class CommentsRepository {
   }
 
   /**
-   * Built dynamically because content and published are independently optional
-   * and each carries its own side effect — editing content forces the comment
-   * back to unpublished, which is why `published = false` is appended to the
-   * SET list rather than passed as a parameter.
+   * Built dynamically because content and published are independently optional,
+   * and editing content carries its own side effect: the comment goes back to
+   * unpublished.
+   *
+   * **`published` is assigned at most once.** The source appended it twice when
+   * both fields were sent — once for the content side effect, once for the
+   * explicit value — producing `SET content = $1, published = false,
+   * published = $2`, which Postgres rejects as a duplicate assignment, so the
+   * request always 500'd. That is §9.2 item 4, approved for fixing in §21.
+   *
+   * Where the two disagree, **the content side effect wins**: an edit always
+   * unpublishes. Letting an explicit `published: true` through alongside new
+   * content would let an author rewrite an approved comment and re-approve it
+   * in the same request, which is precisely the moderation step the side effect
+   * exists to enforce. So the fix is deliberately not "last write wins".
    */
   async updateComment(
     commentId: string,
@@ -177,10 +188,12 @@ export class CommentsRepository {
     if (update.content !== undefined) {
       fields.push(`content = $${paramCount++}`);
       params.push(update.content);
-      fields.push('published = false');
     }
 
-    if (update.published !== undefined) {
+    if (update.content !== undefined) {
+      // An edit returns the comment to moderation, whatever else was sent.
+      fields.push('published = false');
+    } else if (update.published !== undefined) {
       fields.push(`published = $${paramCount++}`);
       params.push(update.published);
     }

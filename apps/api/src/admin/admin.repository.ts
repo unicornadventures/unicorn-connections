@@ -156,6 +156,11 @@ export class AdminRepository {
     await this.db.query('DELETE FROM users WHERE id = $1', [userId]);
   }
 
+  /**
+   * Two tables, genuinely atomic. The source's BEGIN/COMMIT around these was a
+   * no-op (see `withTransaction`); this is the §9.2 fix, so a failure updating
+   * the profile no longer leaves the deceased flag changed on its own.
+   */
   async setDeceasedAndNames(
     userId: number,
     isDeceased: boolean,
@@ -166,25 +171,27 @@ export class AdminRepository {
       former_last_name: string | null;
     },
   ): Promise<{ id: number; email: string | null; is_deceased: boolean }> {
-    const updated = await this.db.query<{
-      id: number;
-      email: string | null;
-      is_deceased: boolean;
-    }>(
-      'UPDATE users SET is_deceased = $1 WHERE id = $2 RETURNING id, email, is_deceased',
-      [isDeceased, userId],
-    );
-    await this.db.query(
-      'UPDATE profiles SET first_name = $1, last_name = $2, former_first_name = $3, former_last_name = $4 WHERE user_id = $5',
-      [
-        names.first_name,
-        names.last_name,
-        names.former_first_name,
-        names.former_last_name,
-        userId,
-      ],
-    );
-    return updated.rows[0];
+    return this.db.withTransaction(async (query) => {
+      const updated = await query<{
+        id: number;
+        email: string | null;
+        is_deceased: boolean;
+      }>(
+        'UPDATE users SET is_deceased = $1 WHERE id = $2 RETURNING id, email, is_deceased',
+        [isDeceased, userId],
+      );
+      await query(
+        'UPDATE profiles SET first_name = $1, last_name = $2, former_first_name = $3, former_last_name = $4 WHERE user_id = $5',
+        [
+          names.first_name,
+          names.last_name,
+          names.former_first_name,
+          names.former_last_name,
+          userId,
+        ],
+      );
+      return updated.rows[0];
+    });
   }
 
   /**
@@ -263,17 +270,23 @@ export class AdminRepository {
   /**
    * Moves a user by clearing every membership and inserting one.
    *
-   * Note the INSERT supplies no `school_id`, so a moved user's membership loses
-   * the school context that `createRosterUser` sets. That is the source's, and
-   * it means `GET /api/users/:id/class` reports a null school for anyone who
-   * has been moved. Left alone; flagged in docs §18.
+   * The INSERT still supplies no `school_id`, so a moved user's membership
+   * loses the school context that `createRosterUser` sets, and
+   * `GET /api/users/:id/class` reports a null school for anyone who has been
+   * moved. That is the source's and remains unfixed — it was not among the four
+   * §9.2 items approved in §21, and unlike them it changes a response body.
    */
   async moveUserToClass(userId: number, classId: number): Promise<void> {
-    await this.db.query('DELETE FROM class_user WHERE user_id = $1', [userId]);
-    await this.db.query(
-      'INSERT INTO class_user (class_id, user_id) VALUES ($1, $2)',
-      [classId, userId],
-    );
+    // Atomic for real (§9.2 fix): the delete-then-insert pair must not be able
+    // to strand a user with no class membership at all, which is what a failure
+    // between the two would previously have done.
+    await this.db.withTransaction(async (query) => {
+      await query('DELETE FROM class_user WHERE user_id = $1', [userId]);
+      await query(
+        'INSERT INTO class_user (class_id, user_id) VALUES ($1, $2)',
+        [classId, userId],
+      );
+    });
   }
 
   async deletePasswordResetTokens(userId: string): Promise<void> {

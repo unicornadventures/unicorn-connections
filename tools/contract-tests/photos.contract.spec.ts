@@ -5,7 +5,12 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { FIXTURE, authAs, closeFixturePool, resetFixture } from './src/fixtures.js';
-import { compare, invokeNest, type LegacyHandler } from './src/harness.js';
+import {
+  compare,
+  expectDivergence,
+  invokeNest,
+  type LegacyHandler,
+} from './src/harness.js';
 import { createNestApp } from './src/nest-app.js';
 
 /**
@@ -293,23 +298,51 @@ describe('GET /api/photos/presigned', () => {
   });
 
   /**
-   * No ownership check at all — any authenticated user can presign any key they
-   * can name, including another class's. Deployed behaviour, flagged in §9.2.
+   * **Deliberate divergence** (§9.2 item 6, approved in §21). The source
+   * presigns *anything* — any authenticated user could mint a viewing URL for
+   * any object in the bucket if they could name it. The port resolves the key's
+   * owner from the database and applies `canViewPhotos`, the same rule the
+   * gallery listing uses.
    */
-  it('presigns a key belonging to someone else, identically', async () => {
-    const { legacy: a, nest: b } = await compare(
-      app,
-      legacy.getPhotoPresignedUrlHandler,
-      {
-        method: 'get',
-        path: '/api/photos/presigned',
-        query: { key: FIXTURE.activeUser.now_photo_url },
-        headers: asOutsider(),
-      },
-    );
+  it('diverges: a key belonging to another class is now refused', async () => {
+    const observed = await compare(app, legacy.getPhotoPresignedUrlHandler, {
+      method: 'get',
+      path: '/api/photos/presigned',
+      query: { key: FIXTURE.activeUser.now_photo_url },
+      headers: asOutsider(),
+    });
 
-    expect(b).toEqual(a);
-    expect((a as any).status).toBe(200);
+    expect((observed.legacy as any).status).toBe(200);
+    expectDivergence(
+      observed,
+      {
+        status: 403,
+        body: { error: 'You do not have permission to view this photo.' },
+      },
+      '§9.2 item 6 — presigned URLs were unscoped',
+    );
+  });
+
+  /**
+   * A key that belongs to nobody answers exactly as an unauthorized one does,
+   * so the endpoint cannot be used to probe which keys exist.
+   */
+  it('diverges: an unknown key is refused indistinguishably', async () => {
+    const observed = await compare(app, legacy.getPhotoPresignedUrlHandler, {
+      method: 'get',
+      path: '/api/photos/presigned',
+      query: { key: 'photos/made/up/key.jpg' },
+      headers: asActive(),
+    });
+
+    expectDivergence(
+      observed,
+      {
+        status: 403,
+        body: { error: 'You do not have permission to view this photo.' },
+      },
+      '§9.2 item 6 — unknown keys must not be distinguishable',
+    );
   });
 });
 

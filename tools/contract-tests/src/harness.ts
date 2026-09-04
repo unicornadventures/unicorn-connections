@@ -159,6 +159,36 @@ export function normalize(value: unknown): unknown {
  * Reseeding between the two sides is what makes mutating endpoints comparable:
  * without it the second implementation would see state the first one left.
  */
+/**
+ * Asserts a deliberate divergence: the port answers `expected`, the source
+ * answered something else, and the difference is approved rather than a bug.
+ *
+ * Every §9 fix has to be stated this way. The alternative — deleting or
+ * skipping the parity assertion — would leave the suite unable to tell an
+ * approved change from a regression, which is the one thing it exists to do.
+ * Asserting that the two sides still *differ* also catches the case where a
+ * later refactor silently reverts the fix.
+ *
+ * `reason` is required and should name the §9.2 item, so the diff is
+ * self-documenting when someone finds it in a year.
+ */
+export function expectDivergence(
+  observed: { legacy: unknown; nest: unknown },
+  expected: { status: number; body: unknown },
+  reason: string,
+): void {
+  if (!reason) throw new Error('a divergence must state its reason');
+
+  expect(observed.nest).toEqual({
+    status: expected.status,
+    body: normalize(expected.body),
+  });
+
+  // The port and the source must genuinely disagree here. If they match, the
+  // fix is gone and this test is quietly passing for the wrong reason.
+  expect(observed.nest).not.toEqual(observed.legacy);
+}
+
 export async function compare(
   app: INestApplication,
   handler: LegacyHandler,

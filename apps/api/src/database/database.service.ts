@@ -130,6 +130,48 @@ export class DatabaseService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Runs `work` inside a real transaction on a single pinned connection.
+   *
+   * The source wraps three handlers in `query('BEGIN')` … `query('COMMIT')`,
+   * which is not a transaction: `pool.query()` checks out an arbitrary idle
+   * client per statement, so the BEGIN and the writes can land on different
+   * connections. It usually appears to work because node-postgres hands back
+   * the most-recently-released client, but under concurrency it leaves one
+   * connection idle-in-transaction while the writes go through unwrapped.
+   *
+   * Pinning the client is the whole point — `work` receives a `query` bound to
+   * that one connection, and using `this.query` inside it would silently escape
+   * the transaction. Approved as a §9.2 fix; see docs §21.
+   */
+  async withTransaction<T>(
+    work: (
+      query: <R extends QueryResultRow = any>(
+        text: string,
+        params?: any[],
+      ) => Promise<QueryResult<R>>,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const pool = await this.getPool();
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+      const result = await work((text, params = []) =>
+        client.query(text, params),
+      );
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      // Best-effort: if the connection itself is broken the rollback fails too,
+      // and releasing it below is what actually protects the pool.
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async onModuleDestroy(): Promise<void> {
     const pool = this.pool;
     this.pool = null;

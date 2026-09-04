@@ -15,10 +15,6 @@ async function bootstrap() {
 
   configureApp(app);
 
-  const corsOrigin = config.get<string>('frontendUrl')!;
-  Logger.log(`🔧 CORS Origin: ${corsOrigin}`, 'Bootstrap');
-  app.enableCors({ origin: corsOrigin, credentials: true });
-
   const port = config.get<number>('port')!;
   await app.listen(port);
   Logger.log(

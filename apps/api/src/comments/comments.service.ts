@@ -151,14 +151,13 @@ export class CommentsService {
   }
 
   /**
-   * Publish/unpublish, edit, or — if you send both — neither.
+   * Publish/unpublish, or edit.
    *
-   * Sending `content` **and** `published` together produces
-   * `SET content = $1, published = false, published = $2`, which Postgres
-   * rejects outright ("multiple assignments to same column"), so the request
-   * 500s. That is preserved bug-for-bug: it is what the deployed handler does,
-   * a contract test pins it, and the fix belongs in §9 with a decision attached
-   * rather than smuggled in here. Nothing in the frontend sends both.
+   * Sending both used to 500 — the deployed handler emits `published` twice and
+   * Postgres rejects the duplicate assignment. Fixed under §9.2 item 4 (see
+   * §21): `published` is now assigned once, and when both are sent the content
+   * side effect wins, so an edit always returns the comment to moderation. Both
+   * authorization checks below still apply, in the same order.
    */
   async updateComment(
     commentId: string,

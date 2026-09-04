@@ -3,7 +3,12 @@
 **Target directory:** `/Users/crgdncn/Code/ClassYearNest`
 **Source of truth (read-only):** `/Users/crgdncn/Code/ClassYear`
 **Status:** phase 6 complete (2026-09-04) — API and web client both done. §13 phase 0, §14
-the contract decision, §15–§19 phases 2–6. Remaining: deploy (7), domain split (8).
+the contract decision, §15–§19 phases 2–6, §20 SES, §21 the approved §9.2 fixes.
+Remaining: deploy (7), domain split (8).
+
+> **Before phase 8:** the `unicornconnections.org` SES identity does not exist and the
+> account is in the SES sandbox (§20). Both are lead-time items on that phase's critical
+> path, and the sandbox affects the *existing* app today.
 **Written:** 2026-09-03
 
 > The existing ClassYear repo is the behavioural spec: every decision below is stated in
@@ -754,9 +759,9 @@ strictly blocking.
 1. ~~**Multipart under a single proxy Lambda**~~ — **CLOSED in phase 4 (§17).** No spike was
    needed: no deployed endpoint accepts a file body. Uploads are presigned PUTs the browser
    performs directly against S3. Phase 7 needs no binary handling and no second function.
-2. **SES identity for `noreply@unicornconnections.org`** (§8.6) — does it already exist and
-   is it out of the sandbox? This gates phase 8 and is the likeliest way to break the
-   *existing* app. Check it early; it needs no code and can be done during phase 0.
+2. ~~**SES identity for `noreply@unicornconnections.org`**~~ — **ANSWERED 2026-09-04, and the
+   answer is no on both counts.** See §20. It gates phase 8 exactly as feared, and it also
+   surfaced a live production problem that has nothing to do with the port.
 3. **Apex downtime during the alias move** (§8.6) — accept a few minutes on
    `reunion-connect.org`, or use `associate-alias` for a near-zero-downtime move at the cost
    of template drift? Assumed: accept the window.
@@ -1548,3 +1553,152 @@ else might make differently.
   page loads.
 - `npm run typecheck` now covers all three workspaces. It is not part of
   `npm test`; wire both into CI in phase 7.
+
+
+---
+
+## 20. SES: open question #2, answered — and a live problem
+
+Checked 2026-09-04 against account `372666940943`, read-only, before starting
+phase 7. Open question #2 asked whether a verified SES identity exists for
+`noreply@unicornconnections.org` and whether the account is out of the sandbox.
+
+**No, and no.**
+
+| | |
+|---|---|
+| SES identities (us-east-1) | `reunion-connect.org` (domain, verified), `crgdncn@gmail.com` (address, verified) |
+| `unicornconnections.org` | **not an identity at all**, in any form |
+| Other regions | none — us-east-2, us-west-2, eu-west-1 all empty |
+| `ProductionAccessEnabled` | **`false` — the account is in the SES sandbox** |
+| Quota | 200 messages/day, 1/second |
+
+The live stack `classyear-serverless` has `DomainName = reunion-connect.org`,
+and `template.yaml` sets `SES_FROM_EMAIL: !Sub 'noreply@${DomainName}'`. So the
+app sends as `noreply@reunion-connect.org`, which is verified. That part is fine.
+
+### Consequence for phase 8 — a hard blocker, as predicted
+
+§8.6 has phase 8 hand `reunion-connect.org` to the new stack and drop the old
+one to `unicornconnections.org` only. That means changing the old stack's
+`DomainName` parameter — which changes `SES_FROM_EMAIL` to
+`noreply@unicornconnections.org`, **an identity that does not exist**. Password
+reset on the existing app would break the moment that deploy lands.
+
+Verifying the `unicornconnections.org` domain identity is a prerequisite, not a
+step within phase 8. It needs DNS records in that domain's zone and takes time
+to propagate, so it should be started well before the phase runs.
+
+### The bigger finding: the account is in the SES sandbox *today*
+
+This is not a port concern — it is true of the existing production app right now.
+
+In the sandbox, SES will only deliver **to** verified identities. The only
+verified recipient on the account is `crgdncn@gmail.com`. Every other
+destination is rejected. Which means:
+
+> **Password reset almost certainly does not work in production for any real
+> user.** A request from an ordinary alumnus enqueues an email that SES refuses
+> to deliver.
+
+`SentLast24Hours` is `0.0`, which is consistent with that, though also
+consistent with nobody having asked for a reset.
+
+This compounds two things already known about that flow. §14 found that the
+Express `reset-password` route could never succeed; the deployed Lambda version
+is correct, so the reset *endpoint* works. But if the email carrying the token
+is never delivered, the working endpoint is unreachable. And §8.3's SQS worker
+faithfully hands the message to an SES call that fails.
+
+Requesting production access is a support-ticket turnaround measured in days,
+so it belongs on the critical path for phase 8 alongside the domain identity —
+and arguably deserves attention independently of this port, since it affects the
+app that is live now.
+
+### What this does not change
+
+Nothing in phases 0–7. The port has never depended on real delivery:
+`EmailService` short-circuits to `console.log` when `SES_FROM_EMAIL` is unset
+(§8.3), which is how every local and contract-test run works. Phase 7 deploys to
+`nest.reunion-connect.org`, whose sender is already verified.
+
+---
+
+## 21. Four §9.2 items fixed (2026-09-04)
+
+Approved by the maintainer before phase 7. Four of §9.2's seven items are now
+fixed; the rest stay open with reasons below.
+
+Each fix **breaks contract parity on purpose**, which is why the harness gained
+`expectDivergence`. It asserts the port's new answer *and* that the two sides
+still genuinely differ — so a later refactor that silently reverts a fix fails
+the suite instead of quietly passing it. Deleting or skipping the parity
+assertion would have left the gate unable to tell an approved change from a
+regression, which is the one thing it exists for.
+
+### 1. `PUT /api/comments/:commentId` no longer 500s (§9.2 item 4)
+
+The source appended `published` twice when both fields were sent — once for the
+content side effect, once for the explicit value — producing
+`SET content = $1, published = false, published = $2`, which Postgres rejects.
+The endpoint could not succeed with both fields.
+
+It is now assigned once. **Where the two disagree, the content side effect
+wins**: an edit always returns the comment to moderation. That is a deliberate
+choice, not "last write wins" — honouring an explicit `published: true`
+alongside new content would let an author rewrite an approved comment and
+re-approve it in a single request, defeating the moderation step the side effect
+exists to enforce.
+
+### 2. The fake transactions are real (§9.2 item 7)
+
+`DatabaseService.withTransaction` checks out one client, runs the work against
+that pinned connection, and commits or rolls back. `setDeceasedAndNames` and
+`moveUserToClass` use it.
+
+The callback receives its own `query`; calling `this.query` inside would take a
+different pooled connection and silently escape the transaction, which is the
+same trap the source fell into.
+
+`createSchoolHandler` also had a BEGIN/COMMIT pair but wraps a single INSERT,
+which is already atomic — no transaction added, since one would be ceremony.
+
+Verified directly: a throw inside the callback leaves zero rows; a clean run
+commits.
+
+### 3. `GET /api/photos/presigned` is scoped (§9.2 item 6)
+
+The owner of the requested key is resolved **from the database** — three columns
+can hold one — and `canViewPhotos` applied, the same rule the gallery listing
+uses. Keys are not parsed: they look parseable, but the caller supplies the
+string, so trusting its shape would mean trusting the caller to name their own
+owner.
+
+A key belonging to nobody and a key the caller may not see both answer 403 with
+the same message. Distinguishing them would turn the endpoint into an oracle for
+which keys exist, which is most of what the check is preventing.
+
+### 4. `GET /api/users` is admin-only (§9.2 item 5)
+
+It served an unfiltered list of every user in the system to any authenticated
+caller. Now behind `SuperAdminGuard` — the tightest change that keeps the route.
+`GET /api/admin/users` is the same listing already behind the same guard, and
+nothing in the frontend calls this one at all.
+
+### Still open, deliberately
+
+| Item | Why not now |
+|---|---|
+| §9.2 item 1 — `?requesterId=` spoofing in comments and photos | Needs a coordinated frontend change. The deployed handlers already ignore the parameter where it matters most (§14), so the exposure is smaller than it looks |
+| §9.2 item 2 — unguarded admin endpoints | **Withdrawn** in §18: true of the Express router, false of the deployed handlers |
+| §9.2 item 3 — reset/verify token selection | Already correct in the port: both look up by `token_hash` (§14) |
+| `move-class` drops `school_id` | Changes a response body (`GET /api/users/:id/class` would start reporting a school where it now reports null). Wants its own decision |
+| Deleting a user orphans their gallery objects in S3 | Storage hygiene, not correctness; better handled by a sweep than by widening a delete path |
+
+### What this costs
+
+The contract suite is no longer 100% parity, and that is now a deliberate,
+documented state rather than an aspiration. 242 assertions, of which 4 assert
+divergence. Anyone reading a failure needs to know which kind they are looking
+at — hence the `diverges:` prefix on those test names and the §9.2 item number
+in every reason string.

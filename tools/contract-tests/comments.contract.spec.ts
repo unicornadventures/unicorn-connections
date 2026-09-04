@@ -1,6 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import { FIXTURE, authAs, closeFixturePool } from './src/fixtures.js';
-import { compare, type LegacyHandler } from './src/harness.js';
+import { compare, expectDivergence, type LegacyHandler } from './src/harness.js';
 import { createNestApp } from './src/nest-app.js';
 
 /**
@@ -454,32 +454,42 @@ describe('PUT /api/comments/:commentId', () => {
   });
 
   /**
-   * Preserved bug-for-bug. Sending both fields builds
-   * `SET content = $1, published = false, published = $2`, which Postgres
-   * rejects as a duplicate assignment, so the request 500s. Nothing in the
-   * frontend sends both; see docs §9.3.
+   * **Deliberate divergence** (§9.2 item 4, approved in §21). The source emits
+   * `published` twice when both fields are sent and Postgres rejects the
+   * duplicate assignment, so it 500s. The port assigns it once, and the content
+   * side effect wins — an edit always returns the comment to moderation, so an
+   * author cannot rewrite an approved comment and re-approve it in one request.
    */
-  it('500s identically when content and published are sent together', async () => {
-    // Needs a caller who is both the author and a moderator, or one of the two
-    // authorization checks refuses before the SQL is ever built — which is why
-    // this uses adminUser's self-authored comment. See the fixture.
-    const { legacy: a, nest: b } = await compare(
-      app,
-      legacy.updateCommentHandler,
-      {
-        method: 'put',
-        path: `/api/comments/${FIXTURE.selfModeratedComment.id}`,
-        pathParameters: { commentId: String(FIXTURE.selfModeratedComment.id) },
-        headers: asAdmin(),
-        body: { content: 'Both at once.', published: true },
-      },
-    );
-
-    expect(b).toEqual(a);
-    expect(a).toEqual({
-      status: 500,
-      body: { error: 'Internal server error.' },
+  it('diverges: content + published now succeeds, unpublished', async () => {
+    const observed = await compare(app, legacy.updateCommentHandler, {
+      method: 'put',
+      path: `/api/comments/${FIXTURE.selfModeratedComment.id}`,
+      pathParameters: { commentId: String(FIXTURE.selfModeratedComment.id) },
+      headers: asAdmin(),
+      body: { content: 'Both at once.', published: true },
     });
+
+    expect((observed.legacy as any).status).toBe(500);
+    expectDivergence(
+      observed,
+      {
+        status: 200,
+        body: {
+          comment: {
+            id: FIXTURE.selfModeratedComment.id,
+            target_user_id: FIXTURE.selfModeratedComment.target,
+            commenter_id: FIXTURE.selfModeratedComment.commenter,
+            content: 'Both at once.',
+            // published: true was sent and is deliberately ignored.
+            published: false,
+            // normalize() masks these; they are listed so the shape is exact.
+            created_at: '<created_at>',
+            updated_at: '<updated_at>',
+          },
+        },
+      },
+      '§9.2 item 4 — duplicate assignment to published',
+    );
   });
 
   it('matches on an empty body', async () => {

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { SuperAdminGuard } from '../common/guards/super-admin.guard.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import type { UpdateProfileDto } from './dto/user.dto.js';
@@ -36,7 +37,17 @@ import type { UpdateProfileDto } from './dto/user.dto.js';
 export class UsersController {
   constructor(private readonly users: UsersService) {}
 
+  /**
+   * Every user in the system, paginated.
+   *
+   * `SuperAdminGuard` rather than the controller's `JwtAuthGuard`: the deployed
+   * handler serves this to **any** authenticated caller, which is §9.2 item 5,
+   * approved for fixing in §21. Admin-only is the tightest change that keeps
+   * the route — `GET /api/admin/users` is the same listing already behind the
+   * same guard, and nothing in the frontend calls this one at all.
+   */
   @Get()
+  @UseGuards(SuperAdminGuard)
   list(
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,

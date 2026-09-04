@@ -1,6 +1,8 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { PhotosService } from './photos.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { CurrentUser } from '../common/decorators/current-user.decorator.js';
+import type { AuthUser } from '../common/auth-user.js';
 
 /**
  * `GET /api/photos/presigned?key=…` — a viewing URL for an arbitrary key.
@@ -20,7 +22,10 @@ export class PhotoPresignController {
   constructor(private readonly photos: PhotosService) {}
 
   @Get('presigned')
-  createViewUrl(@Query('key') key?: string) {
-    return this.photos.createViewUrl(key);
+  createViewUrl(
+    @CurrentUser() user: AuthUser,
+    @Query('key') key?: string,
+  ) {
+    return this.photos.createViewUrl(key, user);
   }
 }

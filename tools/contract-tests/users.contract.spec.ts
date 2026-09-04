@@ -1,6 +1,10 @@
 import type { INestApplication } from '@nestjs/common';
 import { FIXTURE, authAs, closeFixturePool } from './src/fixtures.js';
-import { compare, type LegacyHandler } from './src/harness.js';
+import {
+  compare,
+  expectDivergence,
+  type LegacyHandler,
+} from './src/harness.js';
 import { createNestApp } from './src/nest-app.js';
 
 /**
@@ -157,11 +161,11 @@ describe('GET /api/users/:userId/class', () => {
 });
 
 describe('GET /api/users', () => {
-  it('matches on the default page', async () => {
+  it('matches on the default page, for an admin', async () => {
     const { legacy: a, nest: b } = await compare(app, legacy.listUsersHandler, {
       method: 'get',
       path: '/api/users',
-      headers: asActive(),
+      headers: asAdmin(),
     });
 
     expect(b).toEqual(a);
@@ -176,7 +180,7 @@ describe('GET /api/users', () => {
       method: 'get',
       path: '/api/users',
       query: { page: '2', pageSize: '2' },
-      headers: asActive(),
+      headers: asAdmin(),
     });
 
     expect(b).toEqual(a);
@@ -188,11 +192,33 @@ describe('GET /api/users', () => {
       method: 'get',
       path: '/api/users',
       query: { page: '99', pageSize: '10' },
-      headers: asActive(),
+      headers: asAdmin(),
     });
 
     expect(b).toEqual(a);
     expect((a as any).body.users).toEqual([]);
+  });
+
+  /**
+   * **Deliberate divergence** (§9.2 item 5, approved in §21). The source serves
+   * an unfiltered list of every user in the system to *any* authenticated
+   * caller. The port restricts it to super admins — the same guard
+   * `GET /api/admin/users` already carries for the same listing. Nothing in the
+   * frontend calls this route.
+   */
+  it('diverges: an ordinary user is now refused', async () => {
+    const observed = await compare(app, legacy.listUsersHandler, {
+      method: 'get',
+      path: '/api/users',
+      headers: asActive(),
+    });
+
+    expect((observed.legacy as any).status).toBe(200);
+    expectDivergence(
+      observed,
+      { status: 403, body: { error: 'Admin access required.' } },
+      '§9.2 item 5 — GET /api/users listed every user to any caller',
+    );
   });
 });
 

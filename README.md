@@ -85,7 +85,12 @@ npm run contract:verify -- users  # filter by name
 
 For each ported endpoint it issues the same request against the **deployed Lambda handler**
 and against this app, both reading a freshly-seeded scratch database, and asserts the status
-and body match exactly — including error strings. Tokens and timestamps are normalized away,
+and body match exactly — including error strings.
+
+Four assertions deliberately assert the *opposite*: the approved §9.2 fixes (see §21) change
+behaviour on purpose, so they use `expectDivergence`, which pins the new answer **and**
+checks the two sides still differ. A silent revert therefore fails the suite rather than
+quietly passing it. Those tests are named `diverges: …`. Tokens and timestamps are normalized away,
 as is the clock-dependent query string of a presigned S3 URL and the millisecond suffix in a
 freshly minted photo key; nothing else is.
 
