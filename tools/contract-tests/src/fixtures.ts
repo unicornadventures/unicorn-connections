@@ -74,6 +74,79 @@ export const FIXTURE = {
     first_name: 'Bob',
     last_name: 'Newby',
   },
+  // Class admin for `otherClass`, alongside outsiderUser. Deliberately *not* in
+  // `class`: that is what makes the class-admin moderation scope observable —
+  // they can moderate outsiderUser's comments and not activeUser's. Kept out of
+  // `class` so the phase-2 directory and member-count assertions still hold.
+  classAdminUser: {
+    id: 14,
+    email: 'classadmin@example.com',
+    password: 'classadmin-horse',
+    first_name: 'Nancy',
+    last_name: 'Wheeler',
+  },
+
+  // --- comments -----------------------------------------------------------
+  // Three comments cover every branch of the moderation rules. `target` is
+  // whose profile it is on, `commenter` is who wrote it — the distinction
+  // matters because a class admin's reach is scoped on the *commenter*.
+  //
+  //   published   on activeUser's profile, by outsiderUser — the public view
+  //   pending     on activeUser's profile, by outsiderUser — moderatable by
+  //               activeUser (owner), adminUser, and classAdminUser (its author
+  //               is their classmate)
+  //   crossClass  on outsiderUser's profile, by activeUser — moderatable by
+  //               adminUser and by activeUser (its author), but NOT by
+  //               classAdminUser, who shares no class with activeUser
+  publishedComment: {
+    id: 1,
+    target: 10,
+    commenter: 13,
+    content: 'Good to see you again!',
+  },
+  pendingComment: {
+    id: 2,
+    target: 10,
+    commenter: 13,
+    content: 'Long time no see.',
+  },
+  crossClassComment: {
+    id: 3,
+    target: 13,
+    commenter: 10,
+    content: 'Awaiting approval.',
+  },
+  // adminUser commenting on their *own* profile. Contrived, and the only way to
+  // get a caller who is simultaneously the author (so may edit the content) and
+  // a moderator (so may publish it) — which is what it takes to reach the
+  // duplicate-assignment 500 that `PUT` produces when sent both fields at once.
+  // Authorship alone does not confer moderation rights, which is why the
+  // obvious candidates do not work.
+  selfModeratedComment: {
+    id: 4,
+    target: 12,
+    commenter: 12,
+    content: 'Note to self.',
+  },
+
+  // --- events -------------------------------------------------------------
+  reunionEvent: {
+    id: 1,
+    title: 'Reunion Dinner',
+    date: '2030-06-15',
+    time: '18:00:00',
+    location: 'The Old Hall',
+  },
+  picnicEvent: {
+    id: 2,
+    title: 'Family Picnic',
+    date: '2030-06-16',
+    time: '12:00:00',
+    location: 'Riverside Park',
+  },
+
+  feedback: { id: 1, user: 10, comment: 'The directory is lovely.' },
+
   resetToken: 'a'.repeat(64),
 } as const;
 
@@ -136,11 +209,13 @@ export function authAs(user: Parameters<typeof tokenFor>[0]) {
  */
 export async function resetFixture(): Promise<void> {
   const db = getPool();
-  const [activeHash, adminHash, outsiderHash] = await Promise.all([
-    bcrypt.hash(FIXTURE.activeUser.password, 10),
-    bcrypt.hash(FIXTURE.adminUser.password, 10),
-    bcrypt.hash(FIXTURE.outsiderUser.password, 10),
-  ]);
+  const [activeHash, adminHash, outsiderHash, classAdminHash] =
+    await Promise.all([
+      bcrypt.hash(FIXTURE.activeUser.password, 10),
+      bcrypt.hash(FIXTURE.adminUser.password, 10),
+      bcrypt.hash(FIXTURE.outsiderUser.password, 10),
+      bcrypt.hash(FIXTURE.classAdminUser.password, 10),
+    ]);
   const { createHash } = await import('node:crypto');
   const resetHash = createHash('sha256')
     .update(FIXTURE.resetToken)
@@ -274,6 +349,75 @@ export async function resetFixture(): Promise<void> {
   );
 
   await db.query(
+    `INSERT INTO users (id, email, password, is_admin, is_class_admin, created_at)
+     VALUES ($1, $2, $3, false, true, TIMESTAMP '2024-01-05 00:00:00')`,
+    [FIXTURE.classAdminUser.id, FIXTURE.classAdminUser.email, classAdminHash],
+  );
+  await db.query(
+    'INSERT INTO profiles (user_id, first_name, last_name) VALUES ($1, $2, $3)',
+    [
+      FIXTURE.classAdminUser.id,
+      FIXTURE.classAdminUser.first_name,
+      FIXTURE.classAdminUser.last_name,
+    ],
+  );
+  await db.query(
+    'INSERT INTO class_user (class_id, user_id, school_id) VALUES ($1, $2, $3)',
+    [FIXTURE.otherClass.id, FIXTURE.classAdminUser.id, FIXTURE.school.id],
+  );
+
+  // created_at is explicit because both pending queues sort by it descending
+  // and rows seeded in one statement would tie.
+  await db.query(
+    `INSERT INTO comments (id, target_user_id, commenter_id, content, published, created_at)
+     VALUES ($1, $2, $3, $4, true,  TIMESTAMP '2024-02-01 00:00:00'),
+            ($5, $6, $7, $8, false, TIMESTAMP '2024-02-03 00:00:00'),
+            ($9, $10, $11, $12, false, TIMESTAMP '2024-02-02 00:00:00'),
+            ($13, $14, $15, $16, false, TIMESTAMP '2024-01-31 00:00:00')`,
+    [
+      FIXTURE.publishedComment.id,
+      FIXTURE.publishedComment.target,
+      FIXTURE.publishedComment.commenter,
+      FIXTURE.publishedComment.content,
+      FIXTURE.pendingComment.id,
+      FIXTURE.pendingComment.target,
+      FIXTURE.pendingComment.commenter,
+      FIXTURE.pendingComment.content,
+      FIXTURE.crossClassComment.id,
+      FIXTURE.crossClassComment.target,
+      FIXTURE.crossClassComment.commenter,
+      FIXTURE.crossClassComment.content,
+      FIXTURE.selfModeratedComment.id,
+      FIXTURE.selfModeratedComment.target,
+      FIXTURE.selfModeratedComment.commenter,
+      FIXTURE.selfModeratedComment.content,
+    ],
+  );
+
+  // `location` and `event_time` are NOT NULL in the schema, so both are set.
+  for (const event of [FIXTURE.reunionEvent, FIXTURE.picnicEvent]) {
+    await db.query(
+      `INSERT INTO events (id, class_id, school_id, event_name, event_date, event_time, location, description)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)`,
+      [
+        event.id,
+        FIXTURE.class.id,
+        FIXTURE.school.id,
+        event.title,
+        event.date,
+        event.time,
+        event.location,
+      ],
+    );
+  }
+
+  await db.query(
+    `INSERT INTO feedback (id, user_id, comment, created_at)
+     VALUES ($1, $2, $3, TIMESTAMP '2024-03-01 00:00:00')`,
+    [FIXTURE.feedback.id, FIXTURE.feedback.user, FIXTURE.feedback.comment],
+  );
+
+  await db.query(
     `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
      VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
     [FIXTURE.activeUser.id, resetHash],
@@ -284,4 +428,7 @@ export async function resetFixture(): Promise<void> {
   await db.query("SELECT setval('profiles_id_seq', 100, false)");
   await db.query("SELECT setval('schools_id_seq', 100, false)");
   await db.query("SELECT setval('classes_id_seq', 100, false)");
+  await db.query("SELECT setval('comments_id_seq', 100, false)");
+  await db.query("SELECT setval('events_id_seq', 100, false)");
+  await db.query("SELECT setval('feedback_id_seq', 100, false)");
 }

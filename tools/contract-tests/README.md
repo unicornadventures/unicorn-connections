@@ -55,9 +55,16 @@ and every response containing an id would false-positive) and explicit `created_
 endpoints — `reset-password`, `claim-account`, `update-profile` — comparable at all.
 
 The cast: two schools (one deliberately with no class years), three class years (one
-deliberately unlinked, so the current-year auto-link branch has something to find), and four
+deliberately unlinked, so the current-year auto-link branch has something to find), and five
 users — an active member with photos and tags, an unclaimed roster entry, a super admin in
-no class, and a member of a *different* class who exists to be refused.
+no class, a member of a *different* class who exists to be refused, and a class admin of
+that other class, who can moderate their classmate's comments but not the active member's.
+
+Four comments cover the moderation matrix: published, pending, cross-class (unpublished but
+outside the class admin's reach), and one the admin wrote on their own profile — the only
+way to get a caller who is both a comment's author and its moderator, which is what it takes
+to reach the duplicate-assignment 500 that `PUT /api/comments/:id` produces when sent
+`content` and `published` together. Plus two events and one feedback row.
 
 `tokenFor()` / `authAs()` mint a token with the deployed claim set. Both implementations
 verify against the same `JWT_SECRET`, so one token works on both sides — which matters:
@@ -66,8 +73,15 @@ blamed on the wrong thing.
 
 ## Adding a phase
 
-1. Extend `src/fixtures.ts` rather than starting a second fixture.
+1. Extend `src/fixtures.ts` rather than starting a second fixture. Expect to update a few
+   existing assertions — a new user shifts `GET /api/users`'s total and any member count
+   for the class you put them in. That churn is the fixture doing its job.
 2. Add `<module>.contract.spec.ts` importing the handlers from
    `${LEGACY_REPO}/backend/src/lambda/<module>.ts`.
 3. Any intentional divergence gets an allow-list entry with a comment pointing at §9 of the
    conversion doc.
+
+A failing assertion is not automatically a port bug. When `expect(b).toEqual(a)` passes and
+a *following* assertion fails, both implementations agreed and the expectation was wrong —
+which is the suite telling you something true about the source that you had guessed at.
+That is how the comment-moderation cases above got their shape.

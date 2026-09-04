@@ -13,6 +13,9 @@ import { AuthModule } from './auth/auth.module.js';
 import { UsersModule } from './users/users.module.js';
 import { SchoolsModule } from './schools/schools.module.js';
 import { ClassesModule } from './classes/classes.module.js';
+import { CommentsModule } from './comments/comments.module.js';
+import { EventsModule } from './events/events.module.js';
+import { FeedbackModule } from './feedback/feedback.module.js';
 
 @Module({
   imports: [
@@ -42,8 +45,13 @@ import { ClassesModule } from './classes/classes.module.js';
     UsersModule,
     SchoolsModule,
     ClassesModule,
-    // Remaining feature modules land here in phases 3–5:
-    // CommentsModule, EventsModule, PhotosModule, FeedbackModule, AdminModule
+    // CommentsModule mounts controllers at /api/users as well as /api/comments,
+    // which is why it follows UsersModule rather than sitting anywhere.
+    CommentsModule,
+    EventsModule,
+    FeedbackModule,
+    // Remaining feature modules land here in phases 4–5:
+    // PhotosModule, AdminModule
   ],
 })
 export class AppModule {}

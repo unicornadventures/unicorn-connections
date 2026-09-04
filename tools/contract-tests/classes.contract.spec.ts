@@ -141,7 +141,8 @@ describe('GET /api/schools/:schoolId/classes', () => {
       (a as any).body.classes.map((c: any) => [c.year, c.member_count]),
     );
     expect(byYear[FIXTURE.class.year]).toBe(2);
-    expect(byYear[FIXTURE.otherClass.year]).toBe(1);
+    // outsiderUser and classAdminUser.
+    expect(byYear[FIXTURE.otherClass.year]).toBe(2);
   });
 
   it('does not auto-link for a school with no classes configured', async () => {

@@ -4,9 +4,9 @@ A NestJS port of the [ClassYear](../ClassYear) class-reunion platform. The conve
 including the full endpoint inventory and the phased migration, lives in
 [`docs/nestjs-conversion-approach.md`](docs/nestjs-conversion-approach.md).
 
-**Status: phase 2 complete.** Live endpoints: `/pulse`, `/api/auth` (10), `/api/users` (4),
-`/api/schools` (2), `/api/classes` (5), and `GET /api/schools/:schoolId/classes`. Comments,
-events, feedback, photos and admin land in phases 3–5.
+**Status: phase 3 complete.** 40 endpoints live: `/pulse`, `/api/auth`, `/api/users`,
+`/api/schools`, `/api/classes`, `/api/comments`, `/api/events`, `/api/feedback`. Photos and
+admin land in phases 4–5.
 
 Every one of those is checked against the deployed Lambda handler by the contract suite —
 `npm run contract:verify`. That gate, not the unit tests, is what makes the port safe.
@@ -98,6 +98,9 @@ apps/
 │       ├── users/          /api/users
 │       ├── schools/        /api/schools
 │       ├── classes/        /api/classes + /api/schools/:id/classes
+│       ├── comments/       /api/comments + /api/users/:id/comments
+│       ├── events/         /api/events + /api/schools/:id/classes/:id/events
+│       ├── feedback/       /api/feedback, behind a per-request feature flag
 │       ├── photos/         presigned URL resolution (grows into PhotosModule, phase 4)
 │       ├── email/          SES + the password-reset dispatcher
 │       ├── tokens/         reset and verification token minting
@@ -141,3 +144,10 @@ the root; target one with `--workspace @classyear/api`.
 - **Errors are always `{ "error": "..." }`.** `AllExceptionsFilter` guarantees it, because
   the frontend reads `err.response.data.error` and Nest's default body would make every
   server-side message vanish from the UI.
+- **Per-class authorization is a service, not a guard.** `ClassScopeService` answers "may
+  this user moderate this comment / manage this event", because the answer depends on rows
+  the request does not carry. Its two methods deliberately source roles differently — one
+  re-reads the user, one trusts the token — matching the source; see §16 of the doc.
+- **Module import order in `app.module.ts` is deliberate.** `CommentsModule` mounts routes
+  under `/api/users` as well as `/api/comments`, so it follows `UsersModule`. §5.3 explains
+  what breaks otherwise.

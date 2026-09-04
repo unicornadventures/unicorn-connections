@@ -165,7 +165,10 @@ describe('GET /api/users', () => {
     });
 
     expect(b).toEqual(a);
-    expect(a).toMatchObject({ status: 200, body: { total: 4, page: 1, pageSize: 20 } });
+    expect(a).toMatchObject({
+      status: 200,
+      body: { total: 5, page: 1, pageSize: 20 },
+    });
   });
 
   it('matches on an explicit page and size', async () => {

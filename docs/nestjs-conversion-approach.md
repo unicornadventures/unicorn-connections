@@ -2,7 +2,7 @@
 
 **Target directory:** `/Users/crgdncn/Code/ClassYearNest`
 **Source of truth (read-only):** `/Users/crgdncn/Code/ClassYear`
-**Status:** phase 2 complete (2026-09-03) — §13 phase 0, §14 the contract decision, §15 phase 2
+**Status:** phase 3 complete (2026-09-03) — §13 phase 0, §14 the contract decision, §15 phase 2, §16 phase 3
 **Written:** 2026-09-03
 
 > The existing ClassYear repo is the behavioural spec: every decision below is stated in
@@ -666,6 +666,14 @@ unauthenticated mutation the production API does not currently expose:
 | `GET /api/classes/:id/alumni-count` | Dead read, no caller |
 | `GET /api/classes/:id/message-count` | Dead read, no caller |
 
+Two more in phase 3, on the same evidence — not deployed, not referenced in
+`frontend/src` — but without the security argument, since both are reads:
+
+| Route | Why not |
+|---|---|
+| `GET /api/events/class/:classId/events` | Dead read; the deployed list is `/api/schools/:schoolId/classes/:classId/events` |
+| `GET /api/events/class/:classId/days-until-next` | Dead read, no caller |
+
 Each is a dozen lines to restore if a consumer turns up. Contrast §14's treatment of the
 three Express-only *auth* endpoints, which were included: `/verify-email` had a live
 frontend caller, and `/me` and `/logout` are read-only and free.
@@ -681,7 +689,7 @@ Each phase ends at a green gate. Nothing merges past a red contract test.
 | **0** ✅ | Scaffold: Nest CLI project, `DatabaseModule`, `SchemaService`, config validation, `docker-compose` Postgres, `/pulse` | `GET /pulse` returns the same JSON; `initialize()` builds a schema `pg_dump`-identical to the old one |
 | **1** ✅ | `AuthModule` + three guards (two deferred, §14) + global exception filter + validation pipe | All 10 auth endpoints pass contract tests, including error-message strings |
 | **2** ✅ | `UsersModule`, `SchoolsModule`, `ClassesModule` — the read-heavy core | Contract tests green; frontend directory + profile pages work against Nest — see §15 |
-| **3** | `CommentsModule` (both mounts), `EventsModule`, `FeedbackModule` | Contract tests green; feature flag verified in both states |
+| **3** ✅ | `CommentsModule` (both mounts), `EventsModule`, `FeedbackModule` | Contract tests green; feature flag verified in both states — see §16 |
 | **4** | `PhotosModule` + S3 + multipart | Upload/delete verified against real S3 **and** through API Gateway binary handling |
 | **5** | `AdminModule` + `adminSchools`/`adminClasses`/`adminEvents` incl. CSV import + bulk link | Full 74-endpoint contract suite green |
 | **6** | Frontend: copy `frontend/` across, point `VITE_API_BASE_URL` at the Nest server | Vitest + Playwright e2e green against Nest |
@@ -965,3 +973,123 @@ endpoints by the deployed code — it remains open for comments and photos.
   `class_school` / `class_user` queries rather than growing a second copy.
 - The fixture now seeds two schools, three class years, and four users including a super
   admin and a deliberate non-member. Phase 3 should extend it rather than start a new one.
+
+---
+
+## 16. Phase 3 — done (2026-09-03)
+
+`CommentsModule` (both mounts), `EventsModule`, `FeedbackModule`.
+
+### Gate
+
+| Gate | Result |
+|---|---|
+| Contract tests green | ✅ 136 assertions across 7 spec files |
+| Feature flag verified in both states | ✅ five cases, including the check-order one below |
+| Schema parity still green | ✅ 78 statements, zero diff |
+| Unit + e2e | ✅ 133 unit, 3 e2e |
+
+### Shipped
+
+| Method | Path | Auth |
+|---|---|---|
+| GET | `/api/users/:userId/comments` | token |
+| GET | `/api/users/:userId/comments/pending` | token; filtered per comment |
+| POST | `/api/users/:userId/comments` | token |
+| GET | `/api/comments/pending` | token; admin or class admin |
+| GET | `/api/comments/my-comments/:commenterId` | token; self or admin |
+| PUT | `/api/comments/:commentId` | token; moderator to publish, author to edit |
+| DELETE | `/api/comments/:commentId` | token; author or moderator |
+| GET | `/api/schools/:schoolId/classes/:classId/events` | token |
+| GET | `/api/events/:eventId` | token |
+| PUT DELETE | `/api/events/:eventId` | token; admin or class admin of that class |
+| GET POST | `/api/feedback` | flag, then token |
+
+That is 40 of the deployed surface across phases 1–3. Photos and admin remain.
+
+### `ClassScopeService` — the deferred guards, resolved
+
+§14 deferred `UserAdminGuard` and `EventAdminGuard` on the grounds that the
+deployed handlers run these checks *inside* the handler, against ids only known
+once a row has been fetched. Phase 3 confirms that and builds the replacement:
+`common/class-scope/class-scope.service.ts`, with `canModerateComments` and
+`canManageEvent`. A guard genuinely could not do this work — a comment's
+authorization depends on who wrote it and whose profile it is on, neither of
+which is in the request.
+
+**The two checks disagree about where roles come from, and the port keeps the
+disagreement.** `canModerateComments` re-reads `is_admin` / `is_class_admin`
+from the users table; `canManageEvent` trusts the JWT claims. Concretely: a
+newly promoted admin can moderate comments immediately but cannot manage events
+until their token is reissued, and a demoted one loses moderation at once while
+keeping event control for up to 24h. Harmonising it means either adding a
+database read to every event write or removing one from every moderation check.
+Both are behaviour changes, so it belongs here as a flagged item rather than a
+silent fix. A unit test asserts each side's current sourcing so that "fixing"
+one fails loudly.
+
+### Decisions
+
+1. **Two more Express-only endpoints are not ported** (added to §9.4):
+   `GET /api/events/class/:classId/events` and
+   `GET /api/events/class/:classId/days-until-next`. Neither is deployed, and
+   neither is referenced anywhere in `frontend/src`. Same reasoning as phase 2's
+   five, minus the security argument — these are dead reads, not dead writes.
+
+2. **The feedback flag is a guard that reads `process.env` per request.** §6
+   called for a guard rather than conditional module loading; the per-request
+   read is the other half of it. The source's flag is a function, not a
+   constant, and the phase gate asks for both states — which a boot-time read
+   would make untestable without two app instances.
+
+   **Guard order is load-bearing.** `@UseGuards(FeedbackEnabledGuard,
+   JwtAuthGuard)`, in that order, because the source checks the flag on the
+   handler's first line, before it looks at the token. A disabled deployment
+   therefore answers 404 to *everyone*; reversing the guards would answer 401 to
+   unauthenticated callers and leak the module's existence. There is a contract
+   test for exactly this.
+
+3. **One service, two controllers, for both comment mounts.** The source mounts
+   a single Express router at `/api/users` and `/api/comments` (§2.2, §5.3).
+   `CommentsController` and `UserCommentsController` share `CommentsService`,
+   which is the same routing with the ownership made legible. `CommentsModule`
+   is imported after `UsersModule` in `AppModule` for the §5.3 ordering reason;
+   the routes do not actually collide today, but the order is what keeps that
+   true if a one-segment route is ever added.
+
+### Divergences found while porting
+
+**`PUT /api/comments/:commentId` with both `content` and `published` always
+500s.** The handler builds its SET list dynamically; supplying `content`
+appends `published = false` (an edit returns a comment to moderation), and
+supplying `published` appends `published = $n`. The result is
+`SET content = $1, published = false, published = $2`, which Postgres rejects
+outright as a duplicate assignment. The endpoint cannot succeed with both
+fields. Nothing in the frontend sends both, so it has never been hit in
+production. Reproduced bug-for-bug and pinned by a contract test; the fix is
+two lines but changes behaviour, so it goes to §9.2 rather than being done
+quietly.
+
+Reaching that case in a test needs a caller who is simultaneously the comment's
+author *and* a moderator of it, because either check refuses first otherwise —
+authorship does not confer moderation rights. The fixture gains a self-authored
+admin comment purely for this.
+
+**`PUT /api/events/:eventId` returns one field fewer than `GET`.** Every read
+query joins `schools` for `timezone`; the UPDATE's `RETURNING` clause does not.
+So a PUT response has no `timezone` where the GET for the same event does. The
+source's asymmetry, now pinned.
+
+### Notes for phase 4
+
+- `PhotoUrlService` (phase 2) already owns the S3 client, bucket and region
+  config. `PhotosModule` should absorb `photos/photo-url.*` rather than sit
+  beside it — two modules owning one S3 client is the duplication this port
+  exists to remove.
+- `canManagePhotos` / `canViewPhotos` in `lambda/photos.ts` are two more
+  class-scope predicates. They belong in `ClassScopeService` alongside the two
+  built here, not as private helpers in `PhotosService`.
+- §8.2's multipart-under-Lambda spike is still open and gates the phase-4
+  architecture. Open question #1.
+- The fixture already seeds photo keys for `activeUser` and one `gallery_photos`
+  row; phase 4 should extend that rather than start over.
