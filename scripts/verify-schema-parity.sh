@@ -20,13 +20,13 @@ OLD_DB="${OLD_DB:-classyear_parity_legacy}"
 NEW_DB="${NEW_DB:-classyear_parity_nest}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/tmp/schema-parity}"
 
+# Defaults target the Postgres container on :5432. Override any of them for a
+# different server — a Homebrew install typically wants PGUSER=$(whoami) and
+# ignores the password entirely, since it uses trust auth.
 export PGHOST="${PGHOST:-localhost}"
 export PGPORT="${PGPORT:-5432}"
-export PGUSER="${PGUSER:-$(whoami)}"
-
-# Homebrew Postgres uses trust auth, so PGPASSWORD is usually irrelevant — but
-# node-postgres still wants a string when the server asks for one.
-export PGPASSWORD="${PGPASSWORD:-postgres}"
+export PGUSER="${PGUSER:-postgres}"
+export PGPASSWORD="${PGPASSWORD:-password}"
 
 if [ ! -f "$LEGACY_SCHEMA_SRC" ]; then
   echo "Source schema not found at $LEGACY_SCHEMA_SRC" >&2

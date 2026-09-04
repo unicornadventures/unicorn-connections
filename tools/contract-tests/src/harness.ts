@@ -94,8 +94,27 @@ function normalizePresignedUrl(value: string): string {
   return `${url.origin}${url.pathname}`;
 }
 
+/**
+ * Newly minted photo keys end in a base-36 millisecond timestamp
+ * (`…/10-then-mfp2q8x1.jpg`), so the two sides never agree on one — they run
+ * milliseconds apart by construction.
+ *
+ * Only the suffix is masked. The prefix carries the school, the class, the user
+ * and the photo type, all of which are the interesting part of key generation
+ * and all of which stay compared. A key built under the wrong class, or with
+ * the `photos/other/` fallback taken when it should not have been, still fails.
+ */
+function normalizePhotoKeySuffix(value: string): string {
+  return value.replace(
+    /-(then|now|gallery)-[0-9a-z]+\.jpg/g,
+    '-$1-<suffix>.jpg',
+  );
+}
+
 export function normalize(value: unknown): unknown {
-  if (typeof value === 'string') return normalizePresignedUrl(value);
+  if (typeof value === 'string') {
+    return normalizePhotoKeySuffix(normalizePresignedUrl(value));
+  }
 
   if (Array.isArray(value)) return value.map(normalize);
 

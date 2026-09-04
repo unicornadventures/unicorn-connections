@@ -120,14 +120,79 @@ describe('ClassScopeService.canModerateComments', () => {
   });
 });
 
-describe('ClassScopeService.canManageEvent', () => {
-  const user = (over: Partial<AuthUser> = {}): AuthUser => ({
-    id: 10,
-    email: 'a@b.com',
-    is_admin: false,
-    is_class_admin: false,
-    ...over,
+const user = (over: Partial<AuthUser> = {}): AuthUser => ({
+  id: 10,
+  email: 'a@b.com',
+  is_admin: false,
+  is_class_admin: false,
+  ...over,
+});
+
+const SHARED_PAIR = 'JOIN class_user cu2 ON cu1.class_id = cu2.class_id';
+
+/**
+ * `canManagePhotos` and `canViewPhotos` differ by exactly one role check, and
+ * that difference is the product rule: classmates may look at each other's
+ * galleries, but only class admins may change them. Tabulated so the asymmetry
+ * is visible rather than buried in two near-identical describe blocks.
+ */
+describe('ClassScopeService photo predicates', () => {
+  const cases: {
+    who: string;
+    authUser: AuthUser;
+    sharesClass: boolean;
+    manage: boolean;
+    view: boolean;
+  }[] = [
+    { who: 'the owner', authUser: user({ id: 10 }), sharesClass: false, manage: true, view: true },
+    { who: 'a super admin', authUser: user({ id: 12, is_admin: true }), sharesClass: false, manage: true, view: true },
+    { who: 'a class admin in the same class', authUser: user({ id: 14, is_class_admin: true }), sharesClass: true, manage: true, view: true },
+    { who: 'a class admin in another class', authUser: user({ id: 14, is_class_admin: true }), sharesClass: false, manage: false, view: false },
+    // The interesting row: may view, may not manage.
+    { who: 'an ordinary classmate', authUser: user({ id: 11 }), sharesClass: true, manage: false, view: true },
+    { who: 'a stranger', authUser: user({ id: 13 }), sharesClass: false, manage: false, view: false },
+  ];
+
+  it.each(cases)(
+    '$who -> manage=$manage view=$view',
+    async ({ authUser, sharesClass, manage, view }) => {
+      const db = dbWith(
+        sharesClass ? [{ match: SHARED_PAIR, rows: [{ '?column?': 1 }] }] : [],
+      );
+      const scope = new ClassScopeService(db);
+
+      expect(await scope.canManagePhotos(authUser, 10)).toBe(manage);
+      expect(await scope.canViewPhotos(authUser, 10)).toBe(view);
+    },
+  );
+
+  it('short-circuits for the owner without a lookup', async () => {
+    const db = dbWith([]);
+    const scope = new ClassScopeService(db);
+
+    await scope.canManagePhotos(user({ id: 10 }), 10);
+    await scope.canViewPhotos(user({ id: 10 }), 10);
+
+    expect(queriesOf(db)).toEqual([]);
   });
+
+  it('scopes the shared-class lookup on the target user', async () => {
+    const captured: unknown[][] = [];
+    const db = {
+      query: async (_text: string, params: unknown[]) => {
+        captured.push(params);
+        return { rows: [] };
+      },
+    } as unknown as DatabaseService;
+
+    await new ClassScopeService(db).canViewPhotos(user({ id: 11 }), 10);
+
+    // [requester, target] — unlike canModerateComments, which uses the commenter.
+    expect(captured[0]).toEqual([11, 10]);
+  });
+});
+
+describe('ClassScopeService.canManageEvent', () => {
 
   it('lets a super admin manage any class, without a lookup', async () => {
     const db = dbWith([]);

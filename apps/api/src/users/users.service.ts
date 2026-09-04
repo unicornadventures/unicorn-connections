@@ -8,7 +8,7 @@ import {
 import type { AuthUser } from '../common/auth-user.js';
 import { isValidAvatarColor } from '../common/avatar-colors.js';
 import { rethrowAsInternal } from '../common/http-errors.js';
-import { PhotoUrlService } from '../photos/photo-url.service.js';
+import { S3Service } from '../photos/s3.service.js';
 import {
   UsersRepository,
   type UserWithProfileRow,
@@ -33,7 +33,7 @@ export class UsersService {
 
   constructor(
     private readonly repo: UsersRepository,
-    private readonly photoUrls: PhotoUrlService,
+    private readonly s3: S3Service,
   ) {}
 
   /**
@@ -46,7 +46,7 @@ export class UsersService {
   private async toProfileResponse(
     row: UserWithProfileRow,
   ): Promise<UserProfileResponse> {
-    const [thenUrl, nowUrl] = await this.photoUrls.resolveAll([
+    const [thenUrl, nowUrl] = await this.s3.resolveAll([
       row.then_photo_url,
       row.now_photo_url,
     ]);

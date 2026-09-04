@@ -4,11 +4,13 @@
   "private": true,
   "description": "Old-vs-new endpoint parity gate — invokes the deployed Lambda handlers and diffs them against the NestJS app",
   "type": "module",
+  "_comment_scripts": "Deliberately no `test` script. This suite cannot run bare: it needs a scratch database, a scratch MinIO, and both implementations pointed at them, all of which scripts/run-contract-tests.sh sets up. Naming it `test` would put it in `npm test --workspaces` at the root, where it would fail for want of an environment rather than for want of parity. Run it with `npm run contract:verify`.",
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "contract": "vitest run",
+    "contract:watch": "vitest"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1126.0",
     "@classyear/api": "*",
     "@nestjs/testing": "^12.0.1",
     "bcryptjs": "^3.0.3",

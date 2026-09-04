@@ -16,6 +16,7 @@ import { ClassesModule } from './classes/classes.module.js';
 import { CommentsModule } from './comments/comments.module.js';
 import { EventsModule } from './events/events.module.js';
 import { FeedbackModule } from './feedback/feedback.module.js';
+import { PhotosModule } from './photos/photos.module.js';
 
 @Module({
   imports: [
@@ -50,8 +51,11 @@ import { FeedbackModule } from './feedback/feedback.module.js';
     CommentsModule,
     EventsModule,
     FeedbackModule,
-    // Remaining feature modules land here in phases 4–5:
-    // PhotosModule, AdminModule
+    // The third module mounting controllers at /api/users, after UsersModule
+    // and CommentsModule. Same §5.3 ordering reason.
+    PhotosModule,
+    // Remaining feature module lands here in phase 5:
+    // AdminModule
   ],
 })
 export class AppModule {}

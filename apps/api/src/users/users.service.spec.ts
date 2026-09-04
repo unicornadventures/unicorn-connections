@@ -1,6 +1,6 @@
 import type { AuthUser } from '../common/auth-user.js';
 import { expectRejection } from '../../test/support/expect-rejection.js';
-import { PhotoUrlService } from '../photos/photo-url.service.js';
+import { S3Service } from '../photos/s3.service.js';
 import { UsersService } from './users.service.js';
 import type {
   UsersRepository,
@@ -38,7 +38,7 @@ const photoUrls = {
     key ? `signed:${key}` : null,
   resolveAll: async (keys: (string | null | undefined)[]) =>
     keys.map((key) => (key ? `signed:${key}` : null)),
-} as unknown as PhotoUrlService;
+} as unknown as S3Service;
 
 function serviceWith(repo: Partial<UsersRepository>) {
   return new UsersService(repo as UsersRepository, photoUrls);

@@ -75,6 +75,66 @@ export class ClassScopeService {
   }
 
   /**
+   * Can this user upload or delete `targetUserId`'s then/now photos?
+   *
+   * Yourself, a super admin, or a class admin who shares a class with the
+   * target. Note the shared-class subquery is on the *target*, unlike
+   * `canModerateComments` where it is on the commenter — photos belong to the
+   * person, comments to their author.
+   *
+   * Roles come from the token, like `canManageEvent` and unlike
+   * `canModerateComments`. See the class comment.
+   */
+  async canManagePhotos(
+    authUser: AuthUser,
+    targetUserId: number,
+  ): Promise<boolean> {
+    if (authUser.id === targetUserId) return true;
+    if (authUser.is_admin) return true;
+
+    if (authUser.is_class_admin) {
+      return this.sharesAClass(authUser.id, targetUserId);
+    }
+
+    return false;
+  }
+
+  /**
+   * Can this user *see* `targetUserId`'s gallery?
+   *
+   * Broader than managing: **any** classmate can view, not only class admins.
+   * That single missing `is_class_admin` check is the whole difference between
+   * this and the method above, which is exactly why they are adjacent here
+   * rather than one parameterised helper — the asymmetry should be readable.
+   */
+  async canViewPhotos(
+    authUser: AuthUser,
+    targetUserId: number,
+  ): Promise<boolean> {
+    if (authUser.id === targetUserId) return true;
+    if (authUser.is_admin) return true;
+
+    return this.sharesAClass(authUser.id, targetUserId);
+  }
+
+  /** Do these two users have any class in common? */
+  private async sharesAClass(
+    userId: number,
+    otherUserId: number,
+  ): Promise<boolean> {
+    const result = await this.db.query(
+      `
+      SELECT 1 FROM class_user cu1
+      JOIN class_user cu2 ON cu1.class_id = cu2.class_id
+      WHERE cu1.user_id = $1 AND cu2.user_id = $2
+      LIMIT 1
+    `,
+      [userId, otherUserId],
+    );
+    return result.rows.length > 0;
+  }
+
+  /**
    * Can this user edit or delete events for `classId`?
    *
    * Super admins anywhere; class admins only for a class they belong to;

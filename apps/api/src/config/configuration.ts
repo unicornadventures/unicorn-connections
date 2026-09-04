@@ -178,8 +178,10 @@ export const configuration = (): AppConfig => {
       bucket: env.S3_BUCKET_NAME ?? 'classyear-dev',
       region: env.AWS_REGION,
       // Set only when pointing at LocalStack or MinIO; undefined means the
-      // client addresses real S3.
-      endpoint: env.S3_ENDPOINT,
+      // client addresses real S3. An empty string counts as unset — that is how
+      // a caller overrides an S3_ENDPOINT coming from a .env file on disk,
+      // which ConfigModule would otherwise fill back in.
+      endpoint: env.S3_ENDPOINT || undefined,
     },
   };
 };

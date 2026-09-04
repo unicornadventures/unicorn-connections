@@ -4,7 +4,7 @@ import { SchoolClassesController } from './school-classes.controller.js';
 import { ClassesService } from './classes.service.js';
 import { ClassesRepository } from './classes.repository.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
-import { PhotoUrlModule } from '../photos/photo-url.module.js';
+import { PhotosModule } from '../photos/photos.module.js';
 
 /**
  * Two controllers, one service: the class-scoped routes under `/api/classes`
@@ -14,7 +14,7 @@ import { PhotoUrlModule } from '../photos/photo-url.module.js';
  * the source ended up with the drift this port is undoing.
  */
 @Module({
-  imports: [PhotoUrlModule],
+  imports: [PhotosModule],
   controllers: [ClassesController, SchoolClassesController],
   providers: [ClassesService, ClassesRepository, JwtAuthGuard],
   exports: [ClassesService, ClassesRepository],

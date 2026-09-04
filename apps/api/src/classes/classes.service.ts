@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { AuthUser } from '../common/auth-user.js';
 import { rethrowAsInternal } from '../common/http-errors.js';
-import { PhotoUrlService } from '../photos/photo-url.service.js';
+import { S3Service } from '../photos/s3.service.js';
 import { ClassesRepository } from './classes.repository.js';
 
 /**
@@ -17,7 +17,7 @@ export class ClassesService {
 
   constructor(
     private readonly repo: ClassesRepository,
-    private readonly photoUrls: PhotoUrlService,
+    private readonly s3: S3Service,
   ) {}
 
   /**
@@ -120,7 +120,7 @@ export class ClassesService {
 
       const users = await Promise.all(
         rows.map(async (row) => {
-          const [nowUrl, thenUrl] = await this.photoUrls.resolveAll([
+          const [nowUrl, thenUrl] = await this.s3.resolveAll([
             row.now_photo_url,
             row.then_photo_url,
           ]);
@@ -166,7 +166,7 @@ export class ClassesService {
       const photos = (
         await Promise.all(
           keys.map(async (entry) => ({
-            url: await this.photoUrls.resolve(entry.key),
+            url: await this.s3.resolve(entry.key),
             userId: entry.userId,
           })),
         )

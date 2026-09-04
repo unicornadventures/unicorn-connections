@@ -52,6 +52,46 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
 
+  # Scratch object store for the contract tests, kept separate from the dev
+  # MinIO above for two reasons.
+  #
+  # 1. MINIO_DOMAIN. The contract harness redirects *both* implementations with
+  #    the SDK's standard AWS_ENDPOINT_URL_S3 — the only lever that works, since
+  #    the source app builds `new S3Client({ region })` with no configurable
+  #    endpoint. That yields virtual-host URLs (bucket.localhost:9100) and the
+  #    JS SDK has no env var for path-style, so the server has to accept them.
+  #    MINIO_DOMAIN is what makes MinIO parse `<bucket>.localhost` as a bucket.
+  #
+  # 2. Isolation. The suite creates and deletes objects in `classyear-dev` on
+  #    every fixture reset. Pointed at the dev instance it would delete real
+  #    local photos.
+  #
+  # Ports are mapped 1:1 rather than remapped so the port in the Host header
+  # matches the one MinIO is bound to. No volume, like postgres_test: state is
+  # rebuilt each run, which also means the credentials below always take effect
+  # rather than being frozen into a volume at first init.
+  minio_test:
+    image: quay.io/minio/minio
+    container_name: classyear-nest-minio-test
+    ports:
+      - "9100:9100"
+      - "9101:9101"
+    environment:
+      MINIO_ROOT_USER: contracttest
+      MINIO_ROOT_PASSWORD: contracttest123
+      MINIO_DOMAIN: localhost
+    networks:
+      - local
+    command: server /data --address ":9100" --console-address ":9101"
+    # Not `mc ready local`, the usual MinIO healthcheck: the image's built-in
+    # `local` alias points at :9000, so it reports unhealthy forever on a server
+    # bound to :9100.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9100/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   minio_data:

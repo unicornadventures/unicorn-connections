@@ -1,6 +1,11 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pkg from 'pg';
+import {
+  CreateBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 
 const { Pool } = pkg;
 
@@ -147,6 +152,9 @@ export const FIXTURE = {
 
   feedback: { id: 1, user: 10, comment: 'The directory is lovely.' },
 
+  /** activeUser's one gallery photo. Its object really exists in the bucket. */
+  galleryPhoto: { id: 1, user: 10, caption: 'Prom, 1994.' },
+
   resetToken: 'a'.repeat(64),
 } as const;
 
@@ -166,6 +174,63 @@ function getPool() {
 export async function closeFixturePool(): Promise<void> {
   await pool?.end().catch(() => {});
   pool = null;
+}
+
+/**
+ * Object storage, seeded alongside the database.
+ *
+ * Built exactly as the source builds its client — region and nothing else — so
+ * that `AWS_ENDPOINT_URL_S3` is what redirects it, the same lever that
+ * redirects both implementations under test. Configuring an endpoint here would
+ * make the fixture reach a store the code under test might not.
+ */
+let s3: S3Client | null = null;
+let bucketReady = false;
+
+function getS3() {
+  s3 ??= new S3Client({ region: process.env.AWS_REGION ?? 'us-east-1' });
+  return s3;
+}
+
+const BUCKET = () => process.env.S3_BUCKET_NAME ?? 'classyear-dev';
+
+/**
+ * Re-uploads the objects the fixture's photo keys point at.
+ *
+ * Without this the delete endpoints would be deleting nothing: S3's
+ * `DeleteObject` is idempotent and answers 204 for a key that was never there,
+ * so both implementations would "pass" while proving only that neither
+ * crashed. Seeding the objects makes the delete tests mean what they say.
+ */
+async function resetObjects(): Promise<void> {
+  const client = getS3();
+  const Bucket = BUCKET();
+
+  if (!bucketReady) {
+    await client
+      .send(new CreateBucketCommand({ Bucket }))
+      // Already there from a previous run — fine.
+      .catch(() => {});
+    bucketReady = true;
+  }
+
+  const body = Buffer.from('fixture-jpeg-bytes');
+  await Promise.all(
+    [
+      FIXTURE.activeUser.then_photo_url,
+      FIXTURE.activeUser.now_photo_url,
+      FIXTURE.activeUser.gallery_key,
+    ].map((Key) =>
+      client.send(
+        new PutObjectCommand({
+          Bucket,
+          Key,
+          Body: body,
+          ContentType: 'image/jpeg',
+        }),
+      ),
+    ),
+  );
 }
 
 /**
@@ -289,8 +354,13 @@ export async function resetFixture(): Promise<void> {
     [FIXTURE.class.id, FIXTURE.activeUser.id, FIXTURE.school.id],
   );
   await db.query(
-    'INSERT INTO gallery_photos (user_id, s3_key) VALUES ($1, $2)',
-    [FIXTURE.activeUser.id, FIXTURE.activeUser.gallery_key],
+    'INSERT INTO gallery_photos (id, user_id, s3_key, caption) VALUES ($1, $2, $3, $4)',
+    [
+      FIXTURE.galleryPhoto.id,
+      FIXTURE.activeUser.id,
+      FIXTURE.activeUser.gallery_key,
+      FIXTURE.galleryPhoto.caption,
+    ],
   );
 
   await db.query(
@@ -431,4 +501,7 @@ export async function resetFixture(): Promise<void> {
   await db.query("SELECT setval('comments_id_seq', 100, false)");
   await db.query("SELECT setval('events_id_seq', 100, false)");
   await db.query("SELECT setval('feedback_id_seq', 100, false)");
+  await db.query("SELECT setval('gallery_photos_id_seq', 100, false)");
+
+  await resetObjects();
 }

@@ -1,6 +1,6 @@
 import type { AuthUser } from '../common/auth-user.js';
 import { expectRejection } from '../../test/support/expect-rejection.js';
-import { PhotoUrlService } from '../photos/photo-url.service.js';
+import { S3Service } from '../photos/s3.service.js';
 import { ClassesService } from './classes.service.js';
 import type { ClassesRepository } from './classes.repository.js';
 
@@ -9,7 +9,7 @@ const photoUrls = {
     key ? `signed:${key}` : null,
   resolveAll: async (keys: (string | null | undefined)[]) =>
     keys.map((key) => (key ? `signed:${key}` : null)),
-} as unknown as PhotoUrlService;
+} as unknown as S3Service;
 
 function serviceWith(repo: Partial<ClassesRepository>) {
   return new ClassesService(repo as ClassesRepository, photoUrls);
@@ -189,7 +189,7 @@ describe('ClassesService.getPhotos', () => {
     const dropping = {
       resolve: async (key: string) => (key === 'bad.jpg' ? null : `signed:${key}`),
       resolveAll: async (keys: string[]) => keys.map((k) => `signed:${k}`),
-    } as unknown as PhotoUrlService;
+    } as unknown as S3Service;
 
     const service = new ClassesService(
       {

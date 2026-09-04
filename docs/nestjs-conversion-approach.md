@@ -2,7 +2,7 @@
 
 **Target directory:** `/Users/crgdncn/Code/ClassYearNest`
 **Source of truth (read-only):** `/Users/crgdncn/Code/ClassYear`
-**Status:** phase 3 complete (2026-09-03) — §13 phase 0, §14 the contract decision, §15 phase 2, §16 phase 3
+**Status:** phase 4 complete (2026-09-03) — §13 phase 0, §14 the contract decision, §15–§17 phases 2–4
 **Written:** 2026-09-03
 
 > The existing ClassYear repo is the behavioural spec: every decision below is stated in
@@ -454,7 +454,7 @@ modification to that repo is required.
 
 ## 8. Things that need real work, not mechanical translation
 
-### 8.1 `s3Service.updatePhotoUrlInDatabase` is broken
+### 8.1 `s3Service.updatePhotoUrlInDatabase` is broken — **resolved in phase 4: dead code, not ported**
 
 ```ts
 await query(`UPDATE users SET ${fieldName} = $1 WHERE user_id = $2`, [url, userId]);
@@ -466,15 +466,23 @@ path reaches it; if not, drop it from the port rather than carrying a broken fun
 forward. If something does reach it, it is an existing production bug and fixing it is
 part of the port (record it in §9).
 
-### 8.2 Multipart uploads under Lambda
+### 8.2 Multipart uploads under Lambda — ~~open~~ **resolved in phase 4, §17**
 
-Express dev uses `multer` memory storage. Under API Gateway the body arrives
-base64-encoded, which is why a second `POST /:userId/photo/upload/:photoType` presigned-URL
-endpoint exists. With a single Nest proxy function, `serverless-express` needs
-`binaryMimeTypes` configured (or API Gateway `BinarySettings: ['*/*']`) for `FileInterceptor`
-to work. **Verify this end-to-end early** — it is the one place where the single-function
-architecture is meaningfully harder than per-function handlers. Keep both endpoints either
-way; the frontend uses them for different flows.
+> **This section was wrong.** It assumed the multipart route was deployed. It is not.
+> Every deployed photo endpoint is presigned-URL based, the browser PUTs files directly to
+> S3, and the API never receives file bytes. `binaryMimeTypes` / `BinarySettings` are
+> **not needed in phase 7**, and there is no `FileInterceptor` in the port. Kept here for
+> the record; see §17 for the evidence.
+
+The original text: Express dev uses `multer` memory storage. Under API Gateway the body
+arrives base64-encoded, which is why a second `POST /:userId/photo/upload/:photoType`
+presigned-URL endpoint exists. With a single Nest proxy function, `serverless-express`
+needs `binaryMimeTypes` configured for `FileInterceptor` to work.
+
+What was missed: `routes/photoRoutes.ts` is the *only* thing with a multipart handler, and
+that router is never deployed. The multipart and presigned versions share a method and a
+path — `POST /api/users/:userId/photo/:photoType` — while having entirely different
+contracts, which is the sharpest example yet of why §14 chose the Lambda handlers.
 
 ### 8.3 Two SES/email paths
 
@@ -674,6 +682,16 @@ Two more in phase 3, on the same evidence — not deployed, not referenced in
 | `GET /api/events/class/:classId/events` | Dead read; the deployed list is `/api/schools/:schoolId/classes/:classId/events` |
 | `GET /api/events/class/:classId/days-until-next` | Dead read, no caller |
 
+And in phase 4:
+
+| Route / function | Why not |
+|---|---|
+| `POST /api/users/:userId/photo/:photoType` (**the multipart variant**) | Not deployed. The same method and path *are* deployed as a presigned-URL endpoint, which is what the port implements (§17) |
+| `POST /api/users/:userId/photo/upload/:photoType` | Not deployed, no caller |
+| `PUT /api/users/:userId/photo/:photoType` | Not deployed, no caller |
+| `s3Service.updatePhotoUrlInDatabase` | Throws whenever called — wrong table, wrong column. Referenced only by its own unit test (§8.1) |
+| `s3Service.uploadFileToS3` | Only consumer is the undeployed multipart route |
+
 Each is a dozen lines to restore if a consumer turns up. Contrast §14's treatment of the
 three Express-only *auth* endpoints, which were included: `/verify-email` had a live
 frontend caller, and `/me` and `/logout` are read-only and free.
@@ -690,7 +708,7 @@ Each phase ends at a green gate. Nothing merges past a red contract test.
 | **1** ✅ | `AuthModule` + three guards (two deferred, §14) + global exception filter + validation pipe | All 10 auth endpoints pass contract tests, including error-message strings |
 | **2** ✅ | `UsersModule`, `SchoolsModule`, `ClassesModule` — the read-heavy core | Contract tests green; frontend directory + profile pages work against Nest — see §15 |
 | **3** ✅ | `CommentsModule` (both mounts), `EventsModule`, `FeedbackModule` | Contract tests green; feature flag verified in both states — see §16 |
-| **4** | `PhotosModule` + S3 + multipart | Upload/delete verified against real S3 **and** through API Gateway binary handling |
+| **4** ✅ | `PhotosModule` + S3 (**no multipart — none is deployed, §17**) | Upload/delete verified against a real object store; binary handling n/a — see §17 |
 | **5** | `AdminModule` + `adminSchools`/`adminClasses`/`adminEvents` incl. CSV import + bulk link | Full 74-endpoint contract suite green |
 | **6** | Frontend: copy `frontend/` across, point `VITE_API_BASE_URL` at the Nest server | Vitest + Playwright e2e green against Nest |
 | **7** | Deployment: minimal SAM template, single proxy function, warmer, email worker; new stack `classyear-nest`, own Aurora cluster, served at `nest.reunion-connect.org` (§8.6) | Smoke test against deployed stack; **both** live domains still served by the old app |
@@ -724,9 +742,9 @@ strictly blocking.
 
 ## 12. Open questions
 
-1. **Multipart under a single proxy Lambda** (§8.2) — needs a spike before phase 4 commits
-   to the architecture. If binary handling proves painful, the fallback is a second small
-   function for the two upload routes.
+1. ~~**Multipart under a single proxy Lambda**~~ — **CLOSED in phase 4 (§17).** No spike was
+   needed: no deployed endpoint accepts a file body. Uploads are presigned PUTs the browser
+   performs directly against S3. Phase 7 needs no binary handling and no second function.
 2. **SES identity for `noreply@unicornconnections.org`** (§8.6) — does it already exist and
    is it out of the sandbox? This gates phase 8 and is the likeliest way to break the
    *existing* app. Check it early; it needs no code and can be done during phase 0.
@@ -1093,3 +1111,145 @@ source's asymmetry, now pinned.
   architecture. Open question #1.
 - The fixture already seeds photo keys for `activeUser` and one `gallery_photos`
   row; phase 4 should extend that rather than start over.
+
+---
+
+## 17. Phase 4 — done (2026-09-03)
+
+`PhotosModule` + S3. Seven deployed endpoints.
+
+### Gate
+
+The phase gate was "upload/delete verified against real S3 **and** through API
+Gateway binary handling". The first half is met; **the second half does not
+exist**, for the reason below.
+
+| Gate | Result |
+|---|---|
+| Contract tests green | ✅ 164 assertions across 8 spec files |
+| Upload/delete against a real object store | ✅ MinIO, real objects PUT and DELETEd |
+| API Gateway binary handling | ➖ **not applicable** — no endpoint accepts a body of bytes |
+| Schema parity still green | ✅ 78 statements, zero diff |
+| Unit + e2e | ✅ 173 unit, 3 e2e |
+
+### The finding: there is no multipart to port
+
+§8.2 called multipart "the one place where the single-function architecture is
+meaningfully harder than per-function handlers" and open question #1 wanted a
+spike before this phase committed to an architecture. Reading the deployed
+handlers settles it without a spike:
+
+- **Every deployed photo endpoint is presigned-URL based.** `POST
+  /api/users/:userId/photo/:photoType` takes no body; it returns
+  `{ presignedUrl, key }` and records the key. The browser then PUTs the file
+  **directly to S3** — `UserProfile.tsx:141-144` does exactly that.
+- **The API never receives file bytes.** Not in the deployed handlers, not in
+  the frontend's calls.
+- The multipart handler exists only in `routes/photoRoutes.ts`, which uses
+  `multer.memoryStorage()` and **is not deployed**. It is reachable solely by
+  running the Express server locally.
+
+The trap here is that the multipart route and the presigned route share a method
+and a path — `POST /api/users/:userId/photo/:photoType` — while having entirely
+different contracts. It is the sharpest illustration so far of why §14 picked
+the Lambda handlers as the reference.
+
+**Consequences:**
+
+1. **Open question #1 is closed.** No spike needed, nothing to decide.
+2. **Phase 7 does not need `binaryMimeTypes` or `BinarySettings: ['*/*']`.**
+   §8.2's warning can be struck; the single-proxy architecture has no multipart
+   problem because there is no multipart.
+3. **No `FileInterceptor`, no multer, no body-size limits** anywhere in the port.
+
+### §8.1 resolved: `updatePhotoUrlInDatabase` is dead
+
+§8.1 asked whether any live path reaches the broken function that does
+`UPDATE users SET ${fieldName} = $1 WHERE user_id = $2` against a table with
+neither those columns nor a `user_id`. It does not. The only references in the
+entire source repo are its own definition and its own unit test — no route, no
+handler, no Lambda. It is **not ported** (§9.4).
+
+Worth recording why it survived: the source's test suite mocks the database, so
+a test asserting that a broken query was issued passes happily. §7.1's objection
+to porting that pattern now has a concrete example behind it.
+
+### Shipped
+
+| Method | Path | Auth |
+|---|---|---|
+| POST | `/api/users/:userId/photo/:photoType` | self, admin, or class admin sharing a class |
+| DELETE | `/api/users/:userId/photo/:photoType` | same |
+| GET | `/api/photos/presigned?key=` | any authenticated caller — **no ownership check** |
+| GET | `/api/users/:userId/gallery` | self, admin, or **any** classmate |
+| POST | `/api/users/:userId/gallery` | self or admin only |
+| PUT | `/api/users/:userId/gallery/:photoId` | self or admin only |
+| DELETE | `/api/users/:userId/gallery/:photoId` | self or admin only |
+
+`PhotoUrlService` (phase 2's stopgap) was folded into `S3Service` rather than
+left beside it, as the phase-3 handover asked. `canManagePhotos` and
+`canViewPhotos` joined `ClassScopeService`. Viewing is deliberately broader than
+managing — any classmate may look at a gallery, only class admins may change one
+— which is one missing role check apart in the source and is now a tabulated
+unit test.
+
+### Testing against a real object store
+
+Deletes are half of what this module does, so the contract suite runs against a
+scratch **MinIO** that `scripts/run-contract-tests.sh` starts and stops, rather
+than signing URLs into the void. Objects are seeded by `resetFixture` and the
+tests assert they are actually gone afterwards; `DeleteObject` is idempotent, so
+without seeded objects both implementations would "pass" while proving only that
+neither crashed. One test uploads through a minted URL and reads the bytes back,
+which is the only way to catch a URL that is signed correctly but points at the
+wrong bucket or region.
+
+Pointing **both** implementations at MinIO took some care. The source builds
+`new S3Client({ region })` with no endpoint and no way to configure one, so it
+cannot be aimed at MinIO from inside this repo — using this app's own
+`S3_ENDPOINT` would redirect only the port and the two sides would silently
+address different stores. The SDK's standard `AWS_ENDPOINT_URL_S3` does it from
+outside, for both, without touching the source. That yields virtual-host
+addressing (`bucket.localhost:9100`) and the JS SDK has no environment variable
+for path-style, so MinIO runs with `MINIO_DOMAIN=localhost` to accept it.
+
+One more normalization was needed: keys end in `Date.now().toString(36)`, so the
+two sides never mint the same one. Only the suffix is masked — the school, class,
+user and photo type in the prefix stay compared, so a key built under the wrong
+class still fails.
+
+### Divergences found while porting
+
+**The `photoType` 400 message.** §5.4 recorded it as
+`'photoType must be "then" or "now".'`. That is the Express router's wording;
+the deployed handler says `'Valid userId and photoType (then/now) required.'`.
+Deployed wins (§14), and a contract test pins it.
+
+**`GET /api/photos/presigned` has no ownership check.** Any authenticated user
+can mint a viewing URL for any key in the bucket, including another class's, if
+they can name it. Keys are guessable in principle but the millisecond suffix
+makes it impractical. Deployed as-is; added to §9.2 rather than tightened, since
+a fix needs a product rule about who may view what.
+
+**A new upload never overwrites the old object.** Each mint gets a fresh
+suffix, so the previous object is orphaned in S3 and nothing sweeps it. Storage
+grows with every re-upload. Faithful, and now written down.
+
+**The database row is written when the URL is minted, not when the upload
+succeeds.** A client that requests a URL and abandons the upload leaves a key
+pointing at nothing, which is why every read path tolerates a missing object.
+
+### Notes for phase 5
+
+- `S3Service.deleteFolder` is already ported and has **no phase-4 consumer** —
+  it exists for `DELETE /api/admin/schools/:schoolId` and the cascade branch of
+  `DELETE /api/admin/schools/:schoolId/classes/:classId`, which sweep whole
+  photo prefixes. Use it rather than writing a second sweep.
+- `ClassScopeService` now has four predicates. §14's `UserAdminGuard` work —
+  the per-user checks in `adminRoutes` — should land there as a fifth rather
+  than as a guard.
+- Several `/api/admin/*` routes carry no guard at all (§9.2 item 2). Phase 5
+  reproduces that; it is not the phase to fix it in.
+- The contract harness now manages both Postgres *and* MinIO. Admin school and
+  class deletes will exercise `deleteFolder` against real objects, so seed a few
+  under a prefix that is meant to be swept.

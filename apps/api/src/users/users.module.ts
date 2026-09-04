@@ -3,7 +3,7 @@ import { UsersController } from './users.controller.js';
 import { UsersService } from './users.service.js';
 import { UsersRepository } from './users.repository.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
-import { PhotoUrlModule } from '../photos/photo-url.module.js';
+import { PhotosModule } from '../photos/photos.module.js';
 
 /**
  * Profiles live here rather than in a separate ProfilesModule (docs §3.2 left
@@ -12,7 +12,7 @@ import { PhotoUrlModule } from '../photos/photo-url.module.js';
  * them would produce two modules that could never be used apart.
  */
 @Module({
-  imports: [PhotoUrlModule],
+  imports: [PhotosModule],
   controllers: [UsersController],
   providers: [UsersService, UsersRepository, JwtAuthGuard],
   exports: [UsersService],
