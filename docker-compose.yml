@@ -1,11 +1,11 @@
 services:
   postgres:
     image: postgres:14-alpine
-    container_name: classyear-nest-postgres
+    container_name: connections
     environment:
-      POSTGRES_DB: class_reunion
+      POSTGRES_DB: connections
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: testpass
+      POSTGRES_PASSWORD: password
     ports:
       - "5432:5432"
     volumes:
@@ -22,11 +22,11 @@ services:
   # `docker-compose down` always leaves the next test run a clean slate.
   postgres_test:
     image: postgres:14-alpine
-    container_name: classyear-nest-postgres-test
+    container_name: connections-test
     environment:
-      POSTGRES_DB: class_reunion_test
+      POSTGRES_DB: connections_test
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: testpass
+      POSTGRES_PASSWORD: password
     ports:
       - "5433:5432"
     networks:
@@ -45,7 +45,7 @@ services:
       - "9001:9001"
     environment:
       MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: password123
+      MINIO_ROOT_PASSWORD: password
     networks:
       - local
     volumes:
