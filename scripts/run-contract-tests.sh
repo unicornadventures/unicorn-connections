@@ -32,6 +32,19 @@ export FEEDBACK_ENABLED=true
 # inline instead of reaching for a queue that does not exist locally.
 unset SES_FROM_EMAIL PASSWORD_RESET_QUEUE_URL ADMIN_SEED_PASSWORD_PARAM || true
 
+# Photo fields come back as presigned S3 URLs, which the SDK refuses to build
+# without credentials. Nothing is ever sent to S3 — presigning is pure local
+# signing — so placeholder credentials are enough, and both implementations
+# sign with the same ones. The bucket and region must match the defaults the
+# source falls back to ('classyear-dev', us-east-1) or the two sides would
+# address different objects. S3_ENDPOINT stays unset so neither side is
+# redirected at LocalStack. The harness compares URLs path-only; see normalize.
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-contract-test}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-contract-test}"
+export AWS_REGION="${AWS_REGION:-us-east-1}"
+export S3_BUCKET_NAME="${S3_BUCKET_NAME:-classyear-dev}"
+unset AWS_SESSION_TOKEN AWS_PROFILE S3_ENDPOINT || true
+
 # psql/dropdb/createdb, wherever they live.
 if ! command -v createdb >/dev/null 2>&1; then
   export PATH="/opt/homebrew/opt/postgresql@14/bin:$PATH"

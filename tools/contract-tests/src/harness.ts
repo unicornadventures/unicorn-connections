@@ -75,7 +75,28 @@ export async function invokeNest(
  */
 const VOLATILE = new Set(['token', 'created_at', 'updated_at', 'timestamp']);
 
+/**
+ * A presigned S3 URL carries `X-Amz-Date` and a signature derived from it, so
+ * two invocations a second apart produce different strings for the same object.
+ *
+ * Dropping the query string keeps everything that is actually under test — the
+ * bucket, the region, and the key the row maps to — and discards only the part
+ * that is a function of the clock. A photo field that resolved to the wrong
+ * object, or failed to resolve at all, still fails the comparison.
+ */
+function normalizePresignedUrl(value: string): string {
+  if (!value.includes('X-Amz-Signature')) return value;
+
+  // Deliberately not scheme- or host-restricted: if one side ends up addressing
+  // LocalStack while the other addresses real S3, that is a configuration bug
+  // this comparison should catch, not paper over.
+  const url = new URL(value);
+  return `${url.origin}${url.pathname}`;
+}
+
 export function normalize(value: unknown): unknown {
+  if (typeof value === 'string') return normalizePresignedUrl(value);
+
   if (Array.isArray(value)) return value.map(normalize);
 
   if (value && typeof value === 'object') {

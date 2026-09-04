@@ -61,7 +61,11 @@ export const envSchema = z
     FRONTEND_URL: z.string().default('http://localhost:5173'),
 
     SES_FROM_EMAIL: z.string().optional(),
-    S3_ENDPOINT: z.string().default('http://localhost:4566'),
+    // No default. It used to carry a LocalStack URL, but ConfigModule writes
+    // validated values back into process.env, so the "default" was indistin-
+    // guishable from an operator setting it — every deployed environment would
+    // have pointed its S3 client at localhost:4566. Unset means real S3.
+    S3_ENDPOINT: z.string().optional(),
     S3_BUCKET_NAME: z.string().optional(),
     ADMIN_SEED_PASSWORD_PARAM: z.string().optional(),
     PASSWORD_RESET_QUEUE_URL: z.string().optional(),
@@ -118,6 +122,18 @@ export interface DatabaseConfig {
   connectTimeoutMs: number;
 }
 
+export interface StorageConfig {
+  /**
+   * Defaults to 'classyear-dev' to match `lambda/photos.ts`, which falls back to
+   * that literal. Photo keys are stored in the database without the bucket, so
+   * a wrong value here produces URLs that 404 rather than an error at boot.
+   */
+  bucket: string;
+  region: string;
+  /** Set only for LocalStack/MinIO; unset means real S3. */
+  endpoint?: string;
+}
+
 export interface AppConfig {
   nodeEnv: string;
   port: number;
@@ -128,6 +144,7 @@ export interface AppConfig {
   adminSeedPasswordParam?: string;
   passwordResetQueueUrl?: string;
   database: DatabaseConfig;
+  storage: StorageConfig;
 }
 
 /**
@@ -156,6 +173,13 @@ export const configuration = (): AppConfig => {
       password: env.DB_PASSWORD,
       secretArn: env.DATABASE_SECRET_ARN,
       connectTimeoutMs: env.DB_CONNECT_TIMEOUT_MS,
+    },
+    storage: {
+      bucket: env.S3_BUCKET_NAME ?? 'classyear-dev',
+      region: env.AWS_REGION,
+      // Set only when pointing at LocalStack or MinIO; undefined means the
+      // client addresses real S3.
+      endpoint: env.S3_ENDPOINT,
     },
   };
 };

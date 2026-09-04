@@ -3,7 +3,6 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
   UnauthorizedException,
@@ -16,6 +15,7 @@ import { AuthRepository, type ClaimMatch } from './auth.repository.js';
 import { TokenService } from '../tokens/token.service.js';
 import { PasswordResetDispatcher } from '../email/password-reset-dispatcher.service.js';
 import { decodeRegistrationHash } from '../common/registration-link.js';
+import { rethrowAsInternal } from '../common/http-errors.js';
 
 const BCRYPT_ROUNDS = 10;
 const TOKEN_TTL = '24h';
@@ -59,19 +59,13 @@ export class AuthService {
   /**
    * Wraps an unexpected failure in a 500 carrying the source's endpoint-specific
    * text, while letting deliberate HttpExceptions through untouched.
+   *
+   * Phase 2 moved the body to `common/http-errors.ts` — Users, Schools and
+   * Classes all end their handlers the same way, and three more private copies
+   * of it would be the start of exactly the drift this port exists to undo.
    */
   private rethrow(error: unknown, message: string): never {
-    if (
-      error instanceof BadRequestException ||
-      error instanceof UnauthorizedException ||
-      error instanceof ForbiddenException ||
-      error instanceof NotFoundException ||
-      error instanceof ConflictException
-    ) {
-      throw error;
-    }
-    this.logger.error(message, error as Error);
-    throw new InternalServerErrorException({ error: message });
+    rethrowAsInternal(error, message, this.logger);
   }
 
   async login(email?: string, password?: string) {

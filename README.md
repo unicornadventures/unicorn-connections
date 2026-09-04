@@ -4,8 +4,12 @@ A NestJS port of the [ClassYear](../ClassYear) class-reunion platform. The conve
 including the full endpoint inventory and the phased migration, lives in
 [`docs/nestjs-conversion-approach.md`](docs/nestjs-conversion-approach.md).
 
-**Status: phase 0 complete** — scaffold, config validation, database layer, schema
-migrations, and `/pulse`. No feature endpoints yet; those are phases 1–5.
+**Status: phase 2 complete.** Live endpoints: `/pulse`, `/api/auth` (10), `/api/users` (4),
+`/api/schools` (2), `/api/classes` (5), and `GET /api/schools/:schoolId/classes`. Comments,
+events, feedback, photos and admin land in phases 3–5.
+
+Every one of those is checked against the deployed Lambda handler by the contract suite —
+`npm run contract:verify`. That gate, not the unit tests, is what makes the port safe.
 
 ## Quick start
 
@@ -34,6 +38,7 @@ in which case set `DB_USER` to your own username in `.env`.
 | `npm test` | Vitest unit tests (`*.spec.ts` under `apps/api/src`) |
 | `npm run test:e2e` | Vitest e2e tests (`*.e2e-spec.ts` under `apps/api/test`) |
 | `npm run schema:verify` | **Schema parity gate** — see below |
+| `npm run contract:verify` | **Endpoint parity gate** — see below |
 
 ## Schema parity gate
 
@@ -53,6 +58,26 @@ databases, dumps both with `pg_dump --schema-only`, and diffs. It reads the sour
    78 statements compared.
 ```
 
+## Endpoint parity gate
+
+The same idea applied to responses:
+
+```bash
+npm run contract:verify           # all specs
+npm run contract:verify -- users  # filter by name
+```
+
+For each ported endpoint it issues the same request against the **deployed Lambda handler**
+and against this app, both reading a freshly-seeded scratch database, and asserts the status
+and body match exactly — including error strings. Tokens and timestamps are normalized away,
+as is the clock-dependent query string of a presigned S3 URL; nothing else is.
+
+The reference is the Lambda handlers rather than the Express routers, because API Gateway
+routes to the handlers and the Express server only ever runs on a laptop. The two have
+drifted on the wire — see §14 of the conversion doc. The handlers are invoked as functions
+with a synthetic `APIGatewayProxyEvent`, so no second server is booted and the source repo
+is only ever read.
+
 ## Layout
 
 An npm-workspaces monorepo. `packages/*` is listed before `apps/*` so shared libraries
@@ -67,17 +92,26 @@ apps/
 │       ├── app.module.ts
 │       ├── cli/            init-schema — run migrations and exit
 │       ├── config/         Zod-validated environment contract
+│       ├── common/         guards, filters, decorators, shared helpers
 │       ├── database/       DatabaseService (pg pool), SchemaService, SeedService
+│       ├── auth/           /api/auth
+│       ├── users/          /api/users
+│       ├── schools/        /api/schools
+│       ├── classes/        /api/classes + /api/schools/:id/classes
+│       ├── photos/         presigned URL resolution (grows into PhotosModule, phase 4)
+│       ├── email/          SES + the password-reset dispatcher
+│       ├── tokens/         reset and verification token minting
 │       └── health/         /pulse
 └── web/                    @classyear/web — React SPA (phase 6, placeholder)
 packages/
 └── shared-types/           @classyear/shared-types — entity types for api + web
 tools/
-├── contract-tests/         old-vs-new endpoint parity gate (phase 1, placeholder)
+├── contract-tests/         old-vs-new endpoint parity gate
 └── legacy-schema/          shim that runs the source app's schema.ts unmodified
 infra/                      SAM template and deploy scripts (phase 7, placeholder)
 scripts/
-└── verify-schema-parity.sh
+├── verify-schema-parity.sh
+└── run-contract-tests.sh
 docs/
 └── nestjs-conversion-approach.md
 ```
@@ -98,3 +132,12 @@ the root; target one with `--workspace @classyear/api`.
 - **`/pulse` is the only route outside `/api`.** The global prefix excludes it, matching the
   source, where the SAM warmer hits it at the root.
 - **Raw SQL, no ORM.** Deliberate; see §3.3 of the conversion doc.
+- **The deployed Lambda handlers are the contract, not the Express routers.** Where the two
+  disagree — response shape, error wording, whether a check exists at all — the handler
+  wins, because that is what production serves. §14 of the conversion doc has the evidence.
+- **Path parameters stay strings.** `GET /api/users/abc` reaches Postgres and answers 500
+  today. A `ParseIntPipe` would turn that into a 400 with different wording, so there is
+  none. It looks like an oversight; it is the contract.
+- **Errors are always `{ "error": "..." }`.** `AllExceptionsFilter` guarantees it, because
+  the frontend reads `err.response.data.error` and Nest's default body would make every
+  server-side message vanish from the UI.

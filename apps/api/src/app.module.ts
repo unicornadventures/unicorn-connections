@@ -10,6 +10,9 @@ import { HealthModule } from './health/health.module.js';
 import { TokensModule } from './tokens/tokens.module.js';
 import { EmailModule } from './email/email.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { UsersModule } from './users/users.module.js';
+import { SchoolsModule } from './schools/schools.module.js';
+import { ClassesModule } from './classes/classes.module.js';
 
 @Module({
   imports: [
@@ -31,8 +34,15 @@ import { AuthModule } from './auth/auth.module.js';
     EmailModule,
     HealthModule,
     AuthModule,
-    // Remaining feature modules land here in phases 2–5:
-    // UsersModule, SchoolsModule, ClassesModule,
+    // UsersModule must stay ahead of the comments-owned controller that phase 3
+    // mounts at this same `/api/users` prefix: Express matched
+    // `GET /api/users/pending` against userRoutes' `GET /:id` because that
+    // router was mounted first, and Nest resolves cross-controller collisions
+    // by module import order too (docs §5.3).
+    UsersModule,
+    SchoolsModule,
+    ClassesModule,
+    // Remaining feature modules land here in phases 3–5:
     // CommentsModule, EventsModule, PhotosModule, FeedbackModule, AdminModule
   ],
 })

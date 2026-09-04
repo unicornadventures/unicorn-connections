@@ -2,7 +2,7 @@
 
 **Target directory:** `/Users/crgdncn/Code/ClassYearNest`
 **Source of truth (read-only):** `/Users/crgdncn/Code/ClassYear`
-**Status:** phase 0 complete (2026-09-03) — see §13 for what shipped and what it changed
+**Status:** phase 2 complete (2026-09-03) — §13 phase 0, §14 the contract decision, §15 phase 2
 **Written:** 2026-09-03
 
 > The existing ClassYear repo is the behavioural spec: every decision below is stated in
@@ -653,6 +653,23 @@ is evidently meant to come back, and re-deriving it later would be waste.
 `utils/dataApiDb.ts` (RDS Data API experiment) and `routes/testHelpers.ts` unless a
 dependency on them turns up.
 
+Five Express-only route handlers, added in phase 2. None has a deployed counterpart in
+`template.yaml`, and none is referenced anywhere in `frontend/src` — they are reachable only
+by running the Express server on a laptop. The three writes would each add an
+unauthenticated mutation the production API does not currently expose:
+
+| Route | Why not |
+|---|---|
+| `POST /api/users/register` | Unauthenticated account creation, while registration is disabled app-wide (§9.3) |
+| `POST /api/users/:userId/assign-class` | Unauthenticated class re-assignment; deployed path is `POST /api/admin/schools/…/users` |
+| `POST /api/schools` | Unauthenticated school creation; deployed path is `POST /api/admin/schools`, admin-gated |
+| `GET /api/classes/:id/alumni-count` | Dead read, no caller |
+| `GET /api/classes/:id/message-count` | Dead read, no caller |
+
+Each is a dozen lines to restore if a consumer turns up. Contrast §14's treatment of the
+three Express-only *auth* endpoints, which were included: `/verify-email` had a live
+frontend caller, and `/me` and `/logout` are read-only and free.
+
 ---
 
 ## 10. Phased plan
@@ -661,9 +678,9 @@ Each phase ends at a green gate. Nothing merges past a red contract test.
 
 | Phase | Scope | Gate |
 |---|---|---|
-| **0** | Scaffold: Nest CLI project, `DatabaseModule`, `SchemaService`, config validation, `docker-compose` Postgres, `/pulse` | `GET /pulse` returns the same JSON; `initialize()` builds a schema `pg_dump`-identical to the old one |
-| **1** | `AuthModule` + all five guards + global exception filter + validation pipe | All 10 auth endpoints pass contract tests, including error-message strings |
-| **2** | `UsersModule`, `SchoolsModule`, `ClassesModule` — the read-heavy core | Contract tests green; frontend directory + profile pages work against Nest |
+| **0** ✅ | Scaffold: Nest CLI project, `DatabaseModule`, `SchemaService`, config validation, `docker-compose` Postgres, `/pulse` | `GET /pulse` returns the same JSON; `initialize()` builds a schema `pg_dump`-identical to the old one |
+| **1** ✅ | `AuthModule` + three guards (two deferred, §14) + global exception filter + validation pipe | All 10 auth endpoints pass contract tests, including error-message strings |
+| **2** ✅ | `UsersModule`, `SchoolsModule`, `ClassesModule` — the read-heavy core | Contract tests green; frontend directory + profile pages work against Nest — see §15 |
 | **3** | `CommentsModule` (both mounts), `EventsModule`, `FeedbackModule` | Contract tests green; feature flag verified in both states |
 | **4** | `PhotosModule` + S3 + multipart | Upload/delete verified against real S3 **and** through API Gateway binary handling |
 | **5** | `AdminModule` + `adminSchools`/`adminClasses`/`adminEvents` incl. CSV import + bulk link | Full 74-endpoint contract suite green |
@@ -847,3 +864,104 @@ model only the first three are route-level concerns:
   *inline inside each handler*, after argument parsing and with endpoint-specific messages,
   not as route-level middleware. They become a `ClassScopeService` injected where needed,
   built in phases 3 and 5 alongside their first real consumers rather than guessed at now.
+
+---
+
+## 15. Phase 2 — done (2026-09-03)
+
+`UsersModule`, `SchoolsModule`, `ClassesModule` — the read-heavy core.
+
+### Gate
+
+| Gate | Result |
+|---|---|
+| Contract tests green | ✅ 76 assertions across 4 spec files, `npm run contract:verify` |
+| Schema parity still green | ✅ 78 statements, zero diff |
+| Unit + e2e | ✅ 74 unit, 3 e2e |
+
+The contract suite grew from 34 assertions (auth only) to 76. Every phase-2 endpoint is
+compared against its deployed Lambda handler for status **and** body, including error
+strings, with a freshly-seeded database on each side of each comparison.
+
+### Shipped
+
+| Method | Path | Auth |
+|---|---|---|
+| GET | `/api/users` | token |
+| GET | `/api/users/:userId` | token |
+| GET | `/api/users/:userId/class` | token |
+| PUT | `/api/users/:userId/profile` | token; self or admin |
+| GET | `/api/schools` | **none** |
+| GET | `/api/schools/:schoolId` | token |
+| GET | `/api/schools/:schoolId/classes` | **none** |
+| GET | `/api/classes` | token |
+| GET | `/api/classes/:classId` | token |
+| GET | `/api/classes/:classId/members` | token |
+| GET | `/api/classes/:classId/directory` | token; member or admin |
+| GET | `/api/classes/:classId/photos` | token; member or admin |
+
+Plus `photos/photo-url.service.ts` (presigned S3 URL resolution, extracted early because
+five of the twelve endpoints above return resolved photo URLs), `common/avatar-colors.ts`,
+and `common/http-errors.ts`.
+
+### Decisions
+
+1. **Five Express-only endpoints are not ported** (added to §9.4). None is deployed, none is
+   called anywhere in the frontend, and the three writes would each open a hole that does
+   not exist in production today:
+   - `POST /api/users/register` — unauthenticated account creation. Registration is disabled
+     app-wide (§9.3); this is the same thing by another name.
+   - `POST /api/users/:userId/assign-class` — unauthenticated class re-assignment. The
+     deployed way to put a user in a class is `POST /api/admin/schools/…/users`.
+   - `POST /api/schools` — unauthenticated school creation. Deployed equivalent is
+     `POST /api/admin/schools`, behind an admin check, arriving in phase 5.
+   - `GET /api/classes/:id/alumni-count`, `GET /api/classes/:id/message-count` — dead reads.
+
+   If any turns out to have a consumer, each is a dozen lines to add back.
+
+2. **`PhotoUrlService` ships in phase 2, not phase 4.** `GET /api/users/:userId`, the
+   directory and the slideshow all return presigned URLs rather than the S3 keys the columns
+   actually hold. Deferring it would have meant returning keys and calling it parity. Phase 4
+   absorbs this file into the full `PhotosModule` rather than adding a second S3 client.
+
+3. **`S3_ENDPOINT` lost its `http://localhost:4566` default.** `ConfigModule` writes
+   validated values back into `process.env`, so a schema default is indistinguishable from
+   an operator setting one — every deployed environment would have pointed its S3 client at
+   localhost. Unset now means real S3. Caught by the contract suite, which is the second
+   thing that gate has found that no unit test would have.
+
+4. **Presigned URLs are compared path-only.** The signature is derived from `X-Amz-Date`, so
+   two invocations a second apart differ. `normalize` strips the query string and keeps
+   scheme, host, and key — a field that resolved to the wrong object, to a different bucket,
+   or not at all still fails. The contract script exports placeholder AWS credentials;
+   presigning is pure local signing and never contacts S3.
+
+5. **`AuthService.rethrow` moved to `common/http-errors.ts`.** Three new services end their
+   handlers the same way. It also widened from a list of five exception classes to
+   `instanceof HttpException`, which is strictly more general; the auth contract tests
+   confirmed no behaviour changed.
+
+### Divergences found while porting
+
+Both are cases where the Express router and the deployed handler disagree, resolved per §14
+in favour of the deployed one. Both are now pinned by a contract test.
+
+| | Express | Lambda (ported) |
+|---|---|---|
+| `PUT /api/users/:userId/profile`, duplicate email | 409 | **400** `Email already in use.` |
+| `GET /api/schools/:id/classes`, unknown school | 404 `School not found.` | **200** `{ classes: [] }` |
+
+Also worth recording: `GET /api/classes/:id/directory` and `/photos` take identity from the
+**token**, not from `?userId=`. The Express versions checked whichever id the caller passed,
+so anyone could read any class's directory by naming a member. The frontend still sends
+`?userId=`; it is ignored. This is §9.2's `requesterId` problem already fixed for these two
+endpoints by the deployed code — it remains open for comments and photos.
+
+### Notes for phase 3
+
+- `CommentsModule` mounts at `/api/users` as well as `/api/comments`. `UsersModule` is
+  listed before it in `AppModule` for the §5.3 ordering reason; keep it that way.
+- `ClassesRepository` is exported specifically so events and admin can reuse its
+  `class_school` / `class_user` queries rather than growing a second copy.
+- The fixture now seeds two schools, three class years, and four users including a super
+  admin and a deliberate non-member. Phase 3 should extend it rather than start a new one.
