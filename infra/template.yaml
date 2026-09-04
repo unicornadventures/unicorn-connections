@@ -1,0 +1,519 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: ClassYear (NestJS) - one proxy function + warmer + email worker
+
+# =============================================================================
+# This is the ~51k-line template of the source app, rebuilt (docs §8.5).
+#
+# The old one defines 59 individually-declared Lambda functions wired to 68 API
+# Gateway route events; adding an endpoint means editing YAML in three places.
+# Here there is **one** ApiFunction behind `{proxy+}/ANY`, and Nest's router
+# does the rest — so the route surface lives entirely in the application code
+# the contract tests already cover.
+#
+# Deliberately NOT here:
+#   * `BinarySettings` / `binaryMimeTypes`. §8.2 expected to need them for
+#     multipart uploads. Phase 4 (§17) established there is no multipart: every
+#     photo upload is a presigned PUT the browser performs directly against S3,
+#     and the API never receives file bytes.
+#   * Per-route OPTIONS functions. The source declared eight by hand; Nest's
+#     CORS middleware (in `configureApp`, so the Lambda inherits it) handles
+#     preflight for every route uniformly.
+#
+# Naming is kept distinct from `classyear-serverless` throughout, because both
+# stacks live in one account and several of its names are account-scoped —
+# §8.5's collision table. `Environment` defaults to `nest` for exactly this
+# reason: `classyear-file-storage-${AccountId}-dev` already exists.
+# =============================================================================
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: nodejs22.x
+    MemorySize: 1024
+    Tracing: Active
+    Environment:
+      Variables:
+        NODE_ENV: production
+        DB_HOST: !GetAtt RDSCluster.Endpoint.Address
+        DB_PORT: '5432'
+        DB_NAME: class_reunion
+        DB_USER: classyear_admin
+        DATABASE_SECRET_ARN: !GetAtt RDSCluster.MasterUserSecret.SecretArn
+        JWT_SECRET: !Ref JWTSecret
+        ADMIN_SEED_PASSWORD_PARAM: !Ref AdminSeedPasswordParam
+        FRONTEND_URL: !Sub 'https://${DomainName}'
+        SES_FROM_EMAIL: !Sub 'noreply@${SesSenderDomain}'
+        S3_BUCKET_NAME: !Ref FileBucket
+        FEEDBACK_ENABLED: !Ref FeedbackEnabled
+        PASSWORD_RESET_QUEUE_URL: !Ref PasswordResetEmailQueue
+
+Parameters:
+  Environment:
+    Type: String
+    Default: nest
+    Description: >-
+      Suffix for account-scoped resource names. Must NOT be 'dev' or 'prod'
+      while classyear-serverless exists: that stack's file bucket embeds the
+      account id and its own Environment value, so a matching one here would
+      fail on "bucket already exists" (docs section 8.5).
+
+  JWTSecret:
+    Type: String
+    NoEcho: true
+    Description: JWT signing secret. No fallback exists; the app refuses to boot without it.
+
+  AdminSeedPasswordParam:
+    Type: String
+    Default: '/classyear/nest/admin-seed-password'
+    Description: >-
+      SSM SecureString holding the admin seed password. Seeding is skipped if the
+      parameter does not exist. Never put the password in this template (§8.4).
+
+  DomainName:
+    Type: String
+    Default: nest.reunion-connect.org
+    Description: >-
+      Where this stack is served. A **subdomain** through phase 7 — a subdomain
+      alias does not conflict with the apex alias on the old distribution, so the
+      new stack gets real HTTPS with zero impact on either live site (§8.6).
+      Phase 8 changes this to the apex.
+
+  HostedZoneId:
+    Type: String
+    Default: Z0466195259YGZ44DUBMY
+    Description: Route53 zone for reunion-connect.org
+
+  SesSenderDomain:
+    Type: String
+    Default: reunion-connect.org
+    Description: >-
+      Verified SES identity to send as. Separate from DomainName because the
+      identity is on the apex while this stack is served from a subdomain — SES
+      has no identity for nest.reunion-connect.org and does not need one (§20).
+
+  FeedbackEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: "'false' makes every /api/feedback route return 404 (§6)"
+
+  VPC:
+    Type: AWS::EC2::VPC::Id
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+  SnapshotIdentifier:
+    Type: String
+    Default: ''
+    Description: >-
+      Optional Aurora snapshot to restore from. §8.5 wants this stack's cluster
+      seeded from a snapshot of the live one so the data is realistic and neither
+      app can mutate the other's. Empty creates an empty cluster.
+
+Conditions:
+  RestoreFromSnapshot: !Not [!Equals [!Ref SnapshotIdentifier, '']]
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # The API: one function, one catch-all route
+  # ---------------------------------------------------------------------------
+
+  ClassYearNestAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Environment
+      TracingEnabled: true
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'classyear-nest-api-${Environment}'
+      # Pre-bundled by scripts/bundle-lambda.sh. This is an npm-workspaces
+      # monorepo — apps/api/node_modules does not exist and shared-types is a
+      # symlink with a runtime import — so a directory upload would ship a
+      # function that resolves nothing.
+      CodeUri: build/api/
+      Handler: index.handler
+      VpcConfig:
+        SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      Events:
+        # Every route the app serves, including /pulse at the root. Nest's
+        # global prefix puts everything else under /api.
+        ProxyRoot:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ClassYearNestAPI
+            Path: /
+            Method: ANY
+        Proxy:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ClassYearNestAPI
+            Path: /{proxy+}
+            Method: ANY
+      Policies:
+        - !Ref LambdaSecretsManagerPolicy
+        - !Ref LambdaSESPolicy
+        - S3CrudPolicy:
+            BucketName: !Sub 'classyear-nest-files-${AWS::AccountId}-${Environment}'
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt PasswordResetEmailQueue.QueueName
+
+  # ---------------------------------------------------------------------------
+  # Warmer — now one target instead of 59
+  # ---------------------------------------------------------------------------
+
+  WarmerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'classyear-nest-warmer-${Environment}'
+      CodeUri: build/workers/
+      Handler: index.warmerHandler
+      Timeout: 10
+      # Outside the VPC: it only calls the Lambda API.
+      Environment:
+        Variables:
+          WARM_FUNCTION_NAMES: !Ref ApiFunction
+      Events:
+        WarmSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: true
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt ApiFunction.Arn
+
+  # ---------------------------------------------------------------------------
+  # Password-reset email worker (§8.3 decision (a): keep the queue)
+  # ---------------------------------------------------------------------------
+
+  PasswordResetEmailDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'classyear-nest-password-reset-dlq-${Environment}'
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  PasswordResetEmailQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'classyear-nest-password-reset-${Environment}'
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PasswordResetEmailDLQ.Arn
+        maxReceiveCount: 3
+
+  EmailWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'classyear-nest-email-worker-${Environment}'
+      CodeUri: build/workers/
+      Handler: index.sendPasswordResetEmailHandler
+      Timeout: 30
+      # Deliberately outside the VPC: SES has no VPC endpoint in this account,
+      # so an in-VPC worker could not reach it. That is the reason this is a
+      # separate function rather than another route on the proxy.
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt PasswordResetEmailQueue.Arn
+            BatchSize: 5
+      Policies:
+        - !Ref LambdaSESPolicy
+        - SQSPollerPolicy:
+            QueueName: !GetAtt PasswordResetEmailQueue.QueueName
+
+  # ---------------------------------------------------------------------------
+  # Shared IAM
+  # ---------------------------------------------------------------------------
+
+  LambdaSecretsManagerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: RDS credentials, the admin seed parameter, and VPC ENI management
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !GetAtt RDSCluster.MasterUserSecret.SecretArn
+          - Effect: Allow
+            Action: ssm:GetParameter
+            Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/classyear/*'
+          # SAM does not always attach AWSLambdaVPCAccessExecutionRole when
+          # VpcConfig is set this way, and without ENI rights the function
+          # cannot start inside the VPC at all.
+          - Effect: Allow
+            Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:DescribeSubnets
+              - ec2:AssignPrivateIpAddresses
+              - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
+
+  LambdaSESPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Send transactional email via SES
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [ses:SendEmail, ses:SendRawEmail]
+            Resource: '*'
+
+  # ---------------------------------------------------------------------------
+  # Storage
+  # ---------------------------------------------------------------------------
+
+  FileBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # `classyear-nest-files-...`, not `classyear-file-storage-...`: the old
+      # name is account+environment scoped and a second stack would fail on
+      # "bucket already exists" (§8.5).
+      BucketName: !Sub 'classyear-nest-files-${AWS::AccountId}-${Environment}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          # The browser PUTs photos straight here with a presigned URL, so the
+          # bucket — not the API — is what needs the CORS rule (§17).
+          - AllowedOrigins: [!Sub 'https://${DomainName}']
+            AllowedMethods: [PUT, GET]
+            AllowedHeaders: ['*']
+            MaxAge: 3600
+
+  # ---------------------------------------------------------------------------
+  # Database — its own cluster, not shared with classyear-serverless (§8.5)
+  # ---------------------------------------------------------------------------
+
+  RDSCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBClusterIdentifier: !Sub 'classyear-nest-${Environment}'
+      Engine: aurora-postgresql
+      EngineVersion: '17.9'
+      DatabaseName: !If [RestoreFromSnapshot, !Ref 'AWS::NoValue', class_reunion]
+      MasterUsername: !If [RestoreFromSnapshot, !Ref 'AWS::NoValue', classyear_admin]
+      ManageMasterUserPassword: !If [RestoreFromSnapshot, !Ref 'AWS::NoValue', true]
+      SnapshotIdentifier: !If [RestoreFromSnapshot, !Ref SnapshotIdentifier, !Ref 'AWS::NoValue']
+      StorageEncrypted: true
+      ServerlessV2ScalingConfiguration:
+        # MinCapacity 0 lets it pause when idle (~15s resume on the first
+        # connection), which is why DB_CONNECT_TIMEOUT_MS defaults to 30s.
+        MinCapacity: 0
+        MaxCapacity: 2
+        SecondsUntilAutoPause: 900
+      VpcSecurityGroupIds: [!Ref DBSecurityGroup]
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      BackupRetentionPeriod: 1
+
+  RDSWriterInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub 'classyear-nest-${Environment}-writer'
+      DBClusterIdentifier: !Ref RDSCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-postgresql
+      PubliclyAccessible: false
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for the classyear-nest cluster
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Postgres from the API function only
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: classyear-nest in-VPC Lambda functions
+      VpcId: !Ref VPC
+
+  # VPC endpoints so in-VPC functions reach AWS services without a NAT gateway.
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTPS from Lambda to the interface endpoints
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+  # **Only SQS is created here.** The VPC already carries S3 (gateway),
+  # Secrets Manager and SSM endpoints, created by classyear-serverless:
+  #
+  #   vpce-07830105a43dcca1d  com.amazonaws.us-east-1.s3              Gateway
+  #   vpce-0e68fc1b5d2512c07  com.amazonaws.us-east-1.secretsmanager  Interface, private DNS
+  #   vpce-0fd51366aab59bdfc  com.amazonaws.us-east-1.ssm             Interface, private DNS
+  #
+  # Endpoints are VPC-level shared infrastructure, not per-application: private
+  # DNS means anything in these subnets already resolves those services through
+  # them, including this stack's functions. Declaring duplicates is not merely
+  # redundant, it **fails the deploy** — AWS rejects a second interface endpoint
+  # with private DNS for a service already covered in the VPC, and a second S3
+  # gateway endpoint on the same route table conflicts on the route it inserts.
+  #
+  # §8.5's collision table did not list this; see docs §22.
+  #
+  # SQS is genuinely absent, and this stack needs it: the source ran
+  # forgot-password outside the VPC, but here the one proxy function is in-VPC
+  # and still has to enqueue for the email worker.
+  SQSVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sqs
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+
+  # ---------------------------------------------------------------------------
+  # Frontend hosting: S3 + CloudFront + ACM + Route53
+  # ---------------------------------------------------------------------------
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'classyear-nest-frontend-${AWS::AccountId}-${Environment}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
+
+  FrontendCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      # Only the subdomain for now. Phase 8 replaces this certificate with one
+      # covering the apex and www — §8.6 notes that means two ACM replacements,
+      # because a certificate's domain list is immutable.
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+
+  FrontendOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'classyear-nest-oac-${Environment}'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'ClassYear NestJS frontend (${Environment})'
+        Aliases: [!Ref DomainName]
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt FrontendOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # managed CachingOptimized
+          Compress: true
+        # SPA fallback: S3 answers 403/404 for client-side routes like /directory.
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+        ViewerCertificate:
+          AcmCertificateArn: !Ref FrontendCertificate
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+
+  FrontendDNSRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        # A subdomain alias. It does not touch the apex records that point at
+        # the old distribution, which is what makes this stack deployable with
+        # zero impact on either live site (§8.6).
+        - Name: !Ref DomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt FrontendDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2  # CloudFront's fixed zone ID
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway base URL
+    Value: !Sub 'https://${ClassYearNestAPI}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+  PulseUrl:
+    Description: Health check, for the phase 7 smoke test
+    Value: !Sub 'https://${ClassYearNestAPI}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/pulse'
+  FrontendUrl:
+    Value: !Sub 'https://${DomainName}'
+  FrontendBucketName:
+    Description: Upload the built SPA here
+    Value: !Ref FrontendBucket
+  FrontendDistributionId:
+    Description: Invalidate after each frontend deploy
+    Value: !Ref FrontendDistribution
+  FileBucketName:
+    Value: !Ref FileBucket
+  DatabaseEndpoint:
+    Value: !GetAtt RDSCluster.Endpoint.Address

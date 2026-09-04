@@ -53,6 +53,8 @@ docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}' 
 | `npm run test:e2e` | Vitest e2e tests (`*.e2e-spec.ts` under `apps/api/test`) |
 | `npm run typecheck` | `tsc --noEmit` over src **and** specs — `nest build` skips specs |
 | `npm run smoke:web` | **Live-API gate** — drives the SPA against a real Nest server |
+| `./scripts/bundle-lambda.sh` | esbuild the API into `infra/build/` Lambda artifacts |
+| `JWT_SECRET=… ./scripts/deploy.sh --dry-run` | Changeset only — proves the template applies |
 | `npm run schema:verify` | **Schema parity gate** — see below |
 | `npm run contract:verify` | **Endpoint parity gate** — see below |
 
@@ -140,11 +142,14 @@ packages/
 tools/
 ├── contract-tests/         old-vs-new endpoint parity gate
 └── legacy-schema/          shim that runs the source app's schema.ts unmodified
-infra/                      SAM template and deploy scripts (phase 7, placeholder)
+infra/                      SAM template + samconfig for the classyear-nest stack
 scripts/
 ├── verify-schema-parity.sh
 ├── run-contract-tests.sh
-└── smoke-web.sh
+├── smoke-web.sh
+├── bundle-lambda.sh        esbuild the Lambda artifacts
+├── deploy.sh               sam deploy the classyear-nest stack
+└── smoke-deployed.sh       phase 7 gate, incl. "old app still serves both domains"
 docs/
 └── nestjs-conversion-approach.md
 ```

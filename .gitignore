@@ -16,3 +16,7 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+
+# Lambda bundles, produced by scripts/bundle-lambda.sh
+infra/build/
+.aws-sam/

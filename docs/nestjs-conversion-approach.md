@@ -3,8 +3,8 @@
 **Target directory:** `/Users/crgdncn/Code/ClassYearNest`
 **Source of truth (read-only):** `/Users/crgdncn/Code/ClassYear`
 **Status:** phase 6 complete (2026-09-04) — API and web client both done. §13 phase 0, §14
-the contract decision, §15–§19 phases 2–6, §20 SES, §21 the approved §9.2 fixes.
-Remaining: deploy (7), domain split (8).
+the contract decision, §15–§19 phases 2–6, §20 SES, §21 the approved §9.2 fixes, §22 phase 7.
+Phase 7 is built and changeset-verified but **not deployed**; phase 8 remains.
 
 > **Before phase 8:** the `unicornconnections.org` SES identity does not exist and the
 > account is in the SES sandbox (§20). Both are lead-time items on that phase's critical
@@ -725,7 +725,7 @@ Each phase ends at a green gate. Nothing merges past a red contract test.
 | **4** ✅ | `PhotosModule` + S3 (**no multipart — none is deployed, §17**) | Upload/delete verified against a real object store; binary handling n/a — see §17 |
 | **5** ✅ | `AdminModule` + `adminSchools`/`adminClasses`/`adminEvents` incl. CSV import + bulk link | Full contract suite green — see §18 |
 | **6** ✅ | Frontend: copy `frontend/` across, point `VITE_API_BASE_URL` at the Nest server | Vitest + Playwright green; a live-API smoke suite covers the "against Nest" half — see §19 |
-| **7** | Deployment: minimal SAM template, single proxy function, warmer, email worker; new stack `classyear-nest`, own Aurora cluster, served at `nest.reunion-connect.org` (§8.6) | Smoke test against deployed stack; **both** live domains still served by the old app |
+| **7** ◐ | Deployment: minimal SAM template, single proxy function, warmer, email worker; new stack `classyear-nest`, own Aurora cluster, served at `nest.reunion-connect.org` (§8.6) | **Built and changeset-verified, not yet deployed** — see §22 |
 | **8** | Domain split (§8.6): verify SES identity for `noreply@unicornconnections.org` → old stack drops to `unicornconnections.org` only → new stack claims `reunion-connect.org` + `www` | `unicornconnections.org` serves the old app, `reunion-connect.org` serves the new app, both HTTP 200 with valid certs; password reset sends correctly from both |
 | **9** | *Later, optional, separately approved* — move `unicornconnections.org` to the new app too and retire the old stack | — |
 
@@ -1702,3 +1702,141 @@ documented state rather than an aspiration. 242 assertions, of which 4 assert
 divergence. Anyone reading a failure needs to know which kind they are looking
 at — hence the `diverges:` prefix on those test names and the §9.2 item number
 in every reason string.
+
+---
+
+## 22. Phase 7 — built, not yet deployed (2026-09-04)
+
+Everything for the deployment exists and is verified as far as it can be
+without creating billable infrastructure. **The deploy itself is not run** —
+it creates an Aurora cluster, a CloudFront distribution, an ACM certificate and
+a public DNS record, which wants an explicit go-ahead.
+
+### What is verified
+
+| | |
+|---|---|
+| `sam validate --lint` | ✅ clean |
+| CloudFormation changeset | ✅ **accepted** — 32 resources, so the template is genuinely deployable, not just syntactically valid |
+| Lambda handler end-to-end | ✅ real routes through a synthetic APIGatewayProxyEvent |
+| Bundled artifacts | ✅ same, from the bundle rather than the source tree |
+| Account state afterwards | ✅ the review-only stack was deleted; no cluster, no buckets, nothing left behind |
+
+The changeset acceptance is the meaningful one. `sam validate` only checks
+shape; CloudFormation resolving every `!Ref`, `!GetAtt` and `!Sub` against the
+real account is what says the template will actually apply.
+
+### §13's ESM warning was right, and this is where it bit
+
+Phase 0 flagged `serverless-express` under ESM as "the one place this could
+bite" and asked for it to be re-verified at phase 7. It bit:
+
+```
+error TS2349: This expression is not callable.
+  Type 'typeof import(".../serverless-express/src/index")' has no call signatures.
+```
+
+The package is CJS with `module.exports = configure`, so at runtime `.default`
+is `undefined` — but its `.d.ts` declares an ESM-style `export default`. The
+runtime and the types disagree. A default import would have *worked* through
+Node's interop while failing to compile.
+
+Using the **named** `configure` export is correct in both worlds, and is what
+`lambda.ts` does. Worth knowing that the runtime was never the problem; had the
+build been looser, this would have shipped fine and the error would have been
+pure noise.
+
+### Packaging: the monorepo problem, and why bundling
+
+`apps/api/node_modules` does not exist. Everything hoists to the 389 MB repo
+root, and `@classyear/shared-types` is a symlink with a genuine runtime import
+(phase 6 moved `AVATAR_COLORS` there, and `common/avatar-colors.js` re-exports
+from it). Zipping `apps/api` would ship a function that resolves nothing, and
+`sam build` would try to npm-install per function against a `package.json` whose
+dependencies are all hoisted away.
+
+`scripts/bundle-lambda.sh` runs esbuild over the compiled output — 6.8 MB for
+the API, one file, no `node_modules`. Bundling the *output* rather than the
+TypeScript matters: Nest's decorator metadata is already emitted by `nest build`,
+so esbuild never has to reproduce it.
+
+Two things the bundle needs that are easy to miss:
+
+- **Externals.** `@nestjs/microservices`, `@nestjs/websockets`,
+  `class-transformer/storage` and friends are resolved lazily by Nest and only
+  when the corresponding feature is used. None is; bundling them pulls in
+  transports this app has no need for.
+- **A `require` shim.** An ESM bundle has no `require`, but the CJS
+  dependencies inside it still call one — including dynamic requires of node
+  builtins, which esbuild's own shim refuses with
+  `Dynamic require of "util" is not supported`. A `createRequire` banner gives
+  them a real one. This failed at runtime, not at build time, which is exactly
+  why the bundle is executed before being trusted.
+
+### A collision §8.5's table missed: VPC endpoints
+
+§8.5 lists the stack name, the file bucket, the frontend bucket and the SAM
+prefix. It does not mention VPC endpoints, and they would have failed the first
+deploy.
+
+The shared VPC already carries three, created by `classyear-serverless`:
+
+```
+vpce-07830105a43dcca1d  s3              Gateway
+vpce-0e68fc1b5d2512c07  secretsmanager  Interface, private DNS
+vpce-0fd51366aab59bdfc  ssm             Interface, private DNS
+```
+
+AWS rejects a second interface endpoint with private DNS for a service already
+covered in the VPC, and a second S3 gateway endpoint on the same route table
+conflicts on the route it inserts. Declaring them again is not redundant, it is
+fatal.
+
+They are **reused** instead — endpoints are VPC-level shared infrastructure, not
+per-application, and private DNS means this stack's functions already resolve
+through them. Only SQS is created, because it genuinely does not exist and the
+in-VPC proxy needs it: the source ran forgot-password outside the VPC, but here
+the single proxy function is inside it and still has to enqueue.
+
+Dropping the S3 endpoint also made the `PrivateRouteTable` parameter dead, so it
+is gone.
+
+### Also worth recording
+
+- **`--parameter-overrides` replaces, it does not merge.** Half the parameters
+  in `samconfig.toml` and `JWTSecret` on the command line silently dropped the
+  first half, and the deploy failed with "Parameters: [PrivateSubnet1,
+  PrivateSubnet2, VPC] must have values". `scripts/deploy.sh` now owns the whole
+  list; `samconfig.toml` keeps only deployment mechanics.
+- **The template refuses an apex `DOMAIN_NAME`.** A CloudFront alias is
+  exclusive to one distribution account-wide, so claiming `reunion-connect.org`
+  while the old stack still holds it fails the deploy. That is phase 8's
+  choreography, and the script says so rather than letting it surface as a
+  rollback.
+- **`Environment` defaults to `nest`, not `dev`.** §8.5's collision, honoured.
+- **`SesSenderDomain` is a separate parameter from `DomainName`.** The stack is
+  served from `nest.reunion-connect.org` but must send as
+  `noreply@reunion-connect.org` — SES has an identity for the apex and none for
+  the subdomain, and does not need one (§20).
+
+### What the deploy will cost, and what it will not touch
+
+32 resources. The ongoing cost is essentially the Aurora Serverless v2 cluster;
+`MinCapacity: 0` lets it pause when idle, which is also why
+`DB_CONNECT_TIMEOUT_MS` defaults to 30s — a paused cluster takes ~15s to resume.
+
+Nothing it creates touches either live domain. The stack is served from
+`nest.reunion-connect.org`, a **subdomain** alias, and the apex records stay
+pointed at the old distribution. `scripts/smoke-deployed.sh` checks both halves
+of the phase gate: that the new stack answers, and that all four live names are
+still served by `classyear-serverless`.
+
+### Before deploying
+
+1. `JWT_SECRET` must be supplied — it is `NoEcho` and never committed.
+2. Optionally set `SNAPSHOT_IDENTIFIER` to restore the cluster from a snapshot
+   of the live database. §8.5 wants this so the data is realistic; without it
+   the cluster comes up empty and `SchemaService` builds the schema on first
+   boot.
+3. `/classyear/nest/admin-seed-password` in SSM if admin seeding is wanted;
+   seeding is skipped when the parameter is absent.
