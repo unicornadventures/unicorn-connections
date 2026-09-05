@@ -48,11 +48,18 @@ function serviceWith(
 
 const placement = { id: 10, school_id: 1, class_id: 1 };
 
+/** A profile with no photo set yet — the mint path reads this to find what it replaces. */
+const noExistingPhoto = { findPhotoKey: async () => ({ key: null }) };
+
 describe('PhotosService key generation', () => {
   it('builds a school/class-scoped key', async () => {
     const s3 = fakeS3();
     const service = serviceWith(
-      { findPlacement: async () => placement, setPhotoKey: async () => {} },
+      {
+        ...noExistingPhoto,
+        findPlacement: async () => placement,
+        setPhotoKey: async () => {},
+      },
       s3.service,
     );
 
@@ -64,6 +71,7 @@ describe('PhotosService key generation', () => {
 
   it('falls back to other/ for a user in no class', async () => {
     const service = serviceWith({
+      ...noExistingPhoto,
       findPlacement: async () => ({ id: 10, school_id: null, class_id: null }),
       setPhotoKey: async () => {},
     });
@@ -74,12 +82,13 @@ describe('PhotosService key generation', () => {
   });
 
   /**
-   * A fresh suffix per mint means a new upload never overwrites the previous
-   * object — it just stops being referenced. Worth pinning: it is why storage
-   * grows and why nothing is ever clobbered.
+   * A fresh suffix per mint means an upload never writes over the previous
+   * object; the displaced one is deleted explicitly instead (see the replace
+   * suite below). Worth pinning: nothing is ever clobbered in place.
    */
   it('mints a different key each time', async () => {
     const service = serviceWith({
+      ...noExistingPhoto,
       findPlacement: async () => placement,
       setPhotoKey: async () => {},
     });
@@ -94,6 +103,7 @@ describe('PhotosService key generation', () => {
   it('records the key before any upload has happened', async () => {
     let recorded: [string, string, string | null] | null = null;
     const service = serviceWith({
+      ...noExistingPhoto,
       findPlacement: async () => placement,
       setPhotoKey: async (userId, photoType, key) => {
         recorded = [userId, photoType, key];
@@ -103,6 +113,99 @@ describe('PhotosService key generation', () => {
     const { key } = await service.createPhotoUploadUrl('10', 'then', asUser());
 
     expect(recorded).toEqual(['10', 'then', key]);
+  });
+});
+
+/**
+ * known-bugs #12. A profile keeps one `then` and one `now` — replacing either
+ * deletes the object it displaced rather than leaving it in the bucket forever.
+ */
+describe('PhotosService photo replacement', () => {
+  const repoHolding = (existing: string | null, onSet?: () => void) => ({
+    findPhotoKey: async () => ({ key: existing }),
+    findPlacement: async () => placement,
+    setPhotoKey: async () => onSet?.(),
+  });
+
+  it('deletes the object it replaces', async () => {
+    const s3 = fakeS3();
+    const service = serviceWith(repoHolding('photos/1/1/10-then-old.jpg'), s3.service);
+
+    await service.createPhotoUploadUrl('10', 'then', asUser());
+
+    expect(s3.deleted).toEqual(['photos/1/1/10-then-old.jpg']);
+  });
+
+  it('deletes nothing when there was no previous photo', async () => {
+    const s3 = fakeS3();
+    const service = serviceWith(repoHolding(null), s3.service);
+
+    await service.createPhotoUploadUrl('10', 'now', asUser());
+
+    expect(s3.deleted).toEqual([]);
+  });
+
+  /** The column is repointed first, so no window names an object already gone. */
+  it('repoints the row before deleting', async () => {
+    const order: string[] = [];
+    const s3 = fakeS3();
+    (s3.service as { deleteObject: (k: string) => Promise<void> }).deleteObject =
+      async () => {
+        order.push('delete');
+      };
+    const service = serviceWith(
+      repoHolding('photos/1/1/10-then-old.jpg', () => order.push('set')),
+      s3.service,
+    );
+
+    await service.createPhotoUploadUrl('10', 'then', asUser());
+
+    expect(order).toEqual(['set', 'delete']);
+  });
+
+  /**
+   * Two mints in the same millisecond build the same key, and the "previous"
+   * object is then the one this very URL is about to write.
+   */
+  it('does not delete a previous key identical to the new one', async () => {
+    const s3 = fakeS3();
+    let minted: string | undefined;
+    const service = serviceWith(
+      {
+        findPhotoKey: async () => ({ key: minted ?? null }),
+        findPlacement: async () => placement,
+        setPhotoKey: async (_u, _t, key) => {
+          minted = key ?? undefined;
+        },
+      },
+      s3.service,
+    );
+
+    // Frozen clock ⇒ same suffix ⇒ both mints build the same key.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    try {
+      const first = await service.createPhotoUploadUrl('10', 'then', asUser());
+      const second = await service.createPhotoUploadUrl('10', 'then', asUser());
+
+      expect(second.key).toBe(first.key);
+      expect(s3.deleted).toEqual([]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  /** A bucket that will not delete must not fail an upload the user is waiting on. */
+  it('still returns a URL when the delete fails', async () => {
+    const s3 = fakeS3();
+    (s3.service as { deleteObject: (k: string) => Promise<void> }).deleteObject =
+      async () => {
+        throw new Error('AccessDenied');
+      };
+    const service = serviceWith(repoHolding('photos/1/1/10-then-old.jpg'), s3.service);
+
+    await expect(
+      service.createPhotoUploadUrl('10', 'then', asUser()),
+    ).resolves.toHaveProperty('presignedUrl');
   });
 });
 
@@ -122,6 +225,7 @@ describe('PhotosService photoType validation', () => {
 
   it.each(['then', 'now'])('accepts %o', async (good) => {
     const service = serviceWith({
+      ...noExistingPhoto,
       findPlacement: async () => placement,
       setPhotoKey: async () => {},
     });

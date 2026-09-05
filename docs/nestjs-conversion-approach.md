@@ -2039,3 +2039,53 @@ made the account's own reporting self-contradictory.
 inference from a boolean flag to a user-visible symptom was never tested, and one
 cheap experiment falsified it. The same applies to §20's framing, which is left
 in place with this section as its correction rather than rewritten.
+
+---
+
+## 26. Then/now photos no longer keep a history (2026-09-05)
+
+known-bugs #12, reopened and fixed. `POST /api/users/:userId/photo/:photoType`
+now deletes the object it displaces: a profile keeps one `then` and one `now`,
+never a trail of superseded uploads.
+
+### Why the earlier refusal was wrong
+
+§17 recorded the orphaning as faithful-to-source, and known-bugs #12 went
+further and argued the fix would be worse than the bug: the key is recorded
+*before* the browser uploads, so deleting the old object at mint time would
+destroy a user's photo whenever the upload was abandoned.
+
+That reasoning skipped a step. `setPhotoKey` overwrites the column in the same
+breath as the mint. From that moment the old key is referenced by no row,
+returned by no endpoint, and resolvable by nobody — `findKeyOwner` looks the key
+up in `profiles` and `gallery_photos`, so an unreferenced key has no owner and
+`GET /api/photos/presigned` refuses it. An abandoned upload therefore loses the
+photo *either way*. Keeping the object bought nothing but bytes no one could
+reach. The premise that a photo was being protected was simply false, and it
+went unchecked because it sounded prudent.
+
+### What it does
+
+`createPhotoUploadUrl` reads the current key before minting, repoints the column
+at the new one, and only then deletes the old object. That order matters: the
+reverse leaves a window in which the profile names an object that no longer
+exists. A delete that fails is logged and swallowed — the result is exactly the
+orphan the source always left, which is no reason to fail an upload someone is
+waiting on. Two mints inside the same millisecond build the same key, so a
+"previous" key equal to the new one is left alone.
+
+### Scope
+
+Then/now only. Gallery uploads are additive — nine slots, each deleted
+explicitly — so nothing there is displaced. Orphans already sitting in the
+bucket from before this change still want a sweep of unreferenced keys; that is
+unchanged and still separate work.
+
+### Divergence
+
+The contract suite gains a deliberate divergence, verified against the scratch
+MinIO. It cannot use `expectDivergence`, which compares response bodies, and the
+bodies are identical here — the difference is in the bucket. So both sides are
+invoked by hand: the legacy handler leaves `then_photo_url`'s object in place,
+the port removes it. Unit tests pin the ordering, the same-millisecond case, and
+that a failed delete still returns a URL.

@@ -8,6 +8,7 @@ import { FIXTURE, authAs, closeFixturePool, resetFixture } from './src/fixtures.
 import {
   compare,
   expectDivergence,
+  invokeLegacy,
   invokeNest,
   type LegacyHandler,
 } from './src/harness.js';
@@ -201,6 +202,52 @@ describe('POST /api/users/:userId/photo/:photoType', () => {
     expect(await stored.Body!.transformToString()).toBe(
       'a-real-jpeg-would-go-here',
     );
+  });
+
+  /**
+   * **Deliberate divergence** (known-bugs #12). Both implementations repoint the
+   * column at a fresh key, which leaves the previous object referenced by no
+   * row and reachable by no endpoint. The source left it in the bucket anyway,
+   * forever; the port deletes it.
+   *
+   * The bodies are identical, so this is not an `expectDivergence` — the
+   * difference is in the bucket, and both sides are run by hand to show it.
+   */
+  it('diverges: replacing a photo deletes the object it displaced', async () => {
+    const call = {
+      method: 'post' as const,
+      path: `/api/users/${FIXTURE.activeUser.id}/photo/then`,
+      pathParameters: {
+        userId: String(FIXTURE.activeUser.id),
+        photoType: 'then',
+      },
+      headers: asActive(),
+    };
+
+    await resetFixture();
+    await invokeLegacy(legacy.uploadPhotoHandler, call);
+    expect(await objectExists(FIXTURE.activeUser.then_photo_url)).toBe(true);
+
+    await resetFixture();
+    await invokeNest(app, call);
+    expect(await objectExists(FIXTURE.activeUser.then_photo_url)).toBe(false);
+  });
+
+  /** Only the type being replaced is touched — a new `then` leaves `now` alone. */
+  it('leaves the other photo type in place', async () => {
+    await resetFixture();
+
+    await invokeNest(app, {
+      method: 'post',
+      path: `/api/users/${FIXTURE.activeUser.id}/photo/then`,
+      pathParameters: {
+        userId: String(FIXTURE.activeUser.id),
+        photoType: 'then',
+      },
+      headers: asActive(),
+    });
+
+    expect(await objectExists(FIXTURE.activeUser.now_photo_url)).toBe(true);
   });
 });
 

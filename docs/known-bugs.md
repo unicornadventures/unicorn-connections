@@ -213,20 +213,33 @@ undeletable.
 
 ---
 
-## 🟡 12. New uploads never overwrite old objects
+## 🟠 12. New uploads never overwrite old objects — fixed in the port
 
-**Affects:** both apps.
+**Affects:** 🟠 **live (old app only)**.
 
 Every mint gets a fresh `Date.now()` suffix, so re-uploading a photo orphans the
 previous object. Nothing sweeps them; storage grows with every re-upload.
 
-**Evidence:** §17.
-**Status:** **deliberately not fixed.** The obvious fix — delete the previous
-object when minting a new key — is worse than the bug. The key is recorded
-*before* the browser uploads, so deleting the old object at mint time destroys a
-user's existing photo whenever the upload is abandoned or fails. Losing a photo
-is worse than orphaning one. This wants a background sweep of unreferenced keys,
-which is a separate piece of work.
+**Evidence:** §17, §26.
+**Status:** ⚪️ **fixed for then/now** — `createPhotoUploadUrl` deletes the
+object it displaces. A profile keeps one `then` and one `now`; there is no photo
+history.
+
+This entry previously read "deliberately not fixed", on the argument that
+deleting at mint time destroys a photo whenever the upload is abandoned. That
+argument was wrong. `setPhotoKey` repoints the column in the same breath as the
+mint, so from that moment the old key is referenced by no row, resolvable by no
+endpoint, and recoverable by nobody — an abandoned upload loses the photo either
+way. All the old behaviour bought was bytes nobody could reach.
+
+The delete happens *after* the column is repointed, so no window names an object
+that is already gone, and a failed delete is logged and swallowed: it leaves
+exactly the orphan the source always left, which is no reason to fail an upload.
+
+**Still open:** gallery photos and any orphan already in the bucket. Gallery
+uploads are additive rather than replacing, so nothing displaces them; the
+pre-existing orphans want a sweep of unreferenced keys, which is its own piece
+of work.
 
 ---
 

@@ -70,10 +70,10 @@ export class PhotosService {
    * `other/` prefix for a user in no class.
    *
    * The suffix is a base-36 millisecond timestamp, which makes every mint a
-   * fresh key: uploading a new "now" photo never overwrites the old object, it
-   * just stops being referenced. That orphans the previous object in S3 —
-   * nothing sweeps it — which is worth knowing before anyone reasons about
-   * storage growth. Faithful to the source.
+   * fresh key: a new "now" photo never overwrites the old object, it just stops
+   * being referenced. The source left those unreferenced objects in the bucket
+   * forever; `createPhotoUploadUrl` now deletes the one it displaces (see there
+   * for why that is safe).
    */
   private buildKey(
     placement: UserPlacement,
@@ -106,6 +106,25 @@ export class PhotosService {
 
   // ---- then/now profile photos -------------------------------------------
 
+  /**
+   * Mints the presigned PUT for a then/now photo and **deletes the object it
+   * replaces** — a profile keeps one `then` and one `now`, never a history
+   * (known-bugs #12).
+   *
+   * The old object is deleted at mint time, before the browser has uploaded
+   * anything, which sounds like it risks destroying a photo whenever an upload
+   * is abandoned. It does not: `setPhotoKey` overwrites the column in the same
+   * breath, so from the moment the URL is minted the old key is referenced by
+   * no row, resolvable by no endpoint, and recoverable by nobody. The photo is
+   * already gone for the user either way; all that differs is whether the bytes
+   * linger. So delete them.
+   *
+   * Ordering matters: the row is repointed *first*, then the displaced object
+   * goes. The reverse would leave a window where the profile still names an
+   * object that no longer exists. A failed delete is logged and swallowed —
+   * that leaves exactly the orphan the source always left, which is no reason
+   * to fail an upload the user is waiting on.
+   */
   async createPhotoUploadUrl(
     userId: string,
     photoType: string,
@@ -125,12 +144,27 @@ export class PhotosService {
         throw new NotFoundException({ error: 'User not found.' });
       }
 
+      const previous = await this.repo.findPhotoKey(userId, photoType);
+
       const key = this.buildKey(placement, userId, photoType);
       const presignedUrl = await this.s3.presignUpload(key);
 
       // Recorded now, before the browser has uploaded anything. See the class
       // comment for what that implies.
       await this.repo.setPhotoKey(userId, photoType, key);
+
+      // Two mints inside the same millisecond produce the same key, in which
+      // case the "previous" object is the one this URL is about to write.
+      if (previous?.key && previous.key !== key) {
+        try {
+          await this.s3.deleteObject(previous.key);
+        } catch (error) {
+          this.logger.error(
+            `Failed to delete replaced S3 object ${previous.key}`,
+            error as Error,
+          );
+        }
+      }
 
       return { presignedUrl, key };
     } catch (error) {
