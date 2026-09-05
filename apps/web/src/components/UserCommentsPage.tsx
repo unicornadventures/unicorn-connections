@@ -44,13 +44,11 @@ const UserCommentsPage: React.FC = () => {
     if (!userId || !currentUser?.user_id) return;
     setLoading(true);
     try {
-      const profileResponse = await api.get(`/users/${userId}`, {
-        params: { requesterId: currentUser.user_id }
-      });
+      const profileResponse = await api.get(`/users/${userId}`);
       setUserProfile(profileResponse.data);
 
       try {
-        const galleryResponse = await galleryAPI.list(parseInt(userId), currentUser.user_id);
+        const galleryResponse = await galleryAPI.list(parseInt(userId));
         setGalleryPhotos(galleryResponse.data.photos || []);
       } catch {
         setGalleryPhotos([]);
@@ -74,9 +72,7 @@ const UserCommentsPage: React.FC = () => {
     if (!file || !canManagePhotos || !userId) return;
     setUploadingPhoto(photoType);
     try {
-      const response = await api.post(`/users/${userId}/photo/${photoType}`, undefined, {
-        params: { requesterId: currentUser?.user_id }
-      });
+      const response = await api.post(`/users/${userId}/photo/${photoType}`, undefined);
       const { presignedUrl } = response.data;
 
       const putRes = await fetch(presignedUrl, {
@@ -99,9 +95,7 @@ const UserCommentsPage: React.FC = () => {
     if (!canManagePhotos || !userId) return;
     setUploadingPhoto(photoType);
     try {
-      await api.delete(`/users/${userId}/photo/${photoType}`, {
-        params: { requesterId: currentUser?.user_id }
-      });
+      await api.delete(`/users/${userId}/photo/${photoType}`);
       await fetchUserProfileAndComments();
       setError(null);
     } catch (err: any) {

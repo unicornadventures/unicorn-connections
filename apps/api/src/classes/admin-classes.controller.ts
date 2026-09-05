@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ClassesService } from './classes.service.js';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 
 /**
  * `/api/admin/schools/:schoolId/classes` — linking class years to a school.
@@ -33,7 +34,7 @@ export class AdminClassesController {
   /** Links every year from `startYear` to the current one. 201. */
   @Post(':schoolId/classes/bulk')
   bulkLink(
-    @Param('schoolId') schoolId: string,
+    @Param('schoolId', NumericIdPipe) schoolId: string,
     @Body() body: { startYear?: number },
   ) {
     return this.classes.bulkLinkClasses(schoolId, body?.startYear);
@@ -41,7 +42,7 @@ export class AdminClassesController {
 
   @Post(':schoolId/classes')
   link(
-    @Param('schoolId') schoolId: string,
+    @Param('schoolId', NumericIdPipe) schoolId: string,
     @Body() body: { year?: number },
   ) {
     return this.classes.linkClassToSchool(schoolId, body?.year);
@@ -55,8 +56,8 @@ export class AdminClassesController {
   @Delete(':schoolId/classes/:classId')
   @HttpCode(HttpStatus.OK)
   unlink(
-    @Param('schoolId') schoolId: string,
-    @Param('classId') classId: string,
+    @Param('schoolId', NumericIdPipe) schoolId: string,
+    @Param('classId', NumericIdPipe) classId: string,
     @Query('cascadeUsers') cascadeUsers?: string,
   ) {
     return this.classes.unlinkClassFromSchool(

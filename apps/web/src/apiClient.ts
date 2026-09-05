@@ -52,15 +52,13 @@ export const userAPI = {
   getDirectory: (page = 1, pageSize = 20) =>
     api.get(`/users?page=${page}&pageSize=${pageSize}`),
 
-  uploadPhoto: (userId: number, photoType: 'then' | 'now', requesterId?: number) =>
-    api.post<{ presignedUrl: string }>(`/users/${userId}/photo/${photoType}`, undefined, {
-      params: requesterId ? { requesterId } : undefined
-    }),
+  // No requesterId. The API takes identity from the bearer token and ignores
+  // the parameter entirely; sending it only advertised a value worth forging.
+  uploadPhoto: (userId: number, photoType: 'then' | 'now') =>
+    api.post<{ presignedUrl: string }>(`/users/${userId}/photo/${photoType}`),
 
-  deletePhoto: (userId: number, photoType: 'then' | 'now', requesterId?: number) =>
-    api.delete(`/users/${userId}/photo/${photoType}`, {
-      params: requesterId ? { requesterId } : undefined
-    }),
+  deletePhoto: (userId: number, photoType: 'then' | 'now') =>
+    api.delete(`/users/${userId}/photo/${photoType}`),
 };
 
 // School endpoints
@@ -158,19 +156,15 @@ export const commentAPI = {
   getPendingComments: (userId: number) =>
     api.get(`/users/${userId}/comments/pending`),
 
-  getAllPendingComments: (requesterId: number) =>
-    api.get(`/comments/pending`, { params: { requesterId } }),
+  getAllPendingComments: () => api.get(`/comments/pending`),
 
   createComment: (targetUserId: number, content: string, commenterId: number) =>
     api.post(`/users/${targetUserId}/comments`, { content, commenterId }),
 
-  updateComment: (commentId: number, data: { published?: boolean; content?: string; requesterId?: number }) =>
+  updateComment: (commentId: number, data: { published?: boolean; content?: string }) =>
     api.put(`/comments/${commentId}`, data),
 
-  deleteComment: (commentId: number, requesterId?: number) =>
-    api.delete(`/comments/${commentId}`, {
-      params: requesterId ? { requesterId } : undefined
-    }),
+  deleteComment: (commentId: number) => api.delete(`/comments/${commentId}`),
 };
 
 // Feedback endpoints (the backend scopes both to the authenticated user)
@@ -184,17 +178,16 @@ export const feedbackAPI = {
 
 // Gallery endpoints
 export const galleryAPI = {
-  list: (userId: number, requesterId: number) =>
-    api.get(`/users/${userId}/gallery`, { params: { requesterId } }),
+  list: (userId: number) => api.get(`/users/${userId}/gallery`),
 
-  upload: (userId: number, requesterId: number, caption?: string) =>
-    api.post(`/users/${userId}/gallery`, { requesterId, caption }),
+  upload: (userId: number, caption?: string) =>
+    api.post(`/users/${userId}/gallery`, { caption }),
 
-  updateCaption: (userId: number, photoId: number, caption: string, requesterId: number) =>
-    api.put(`/users/${userId}/gallery/${photoId}`, { caption, requesterId }),
+  updateCaption: (userId: number, photoId: number, caption: string) =>
+    api.put(`/users/${userId}/gallery/${photoId}`, { caption }),
 
-  delete: (userId: number, photoId: number, requesterId: number) =>
-    api.delete(`/users/${userId}/gallery/${photoId}`, { params: { requesterId } }),
+  delete: (userId: number, photoId: number) =>
+    api.delete(`/users/${userId}/gallery/${photoId}`),
 };
 
 // Event endpoints

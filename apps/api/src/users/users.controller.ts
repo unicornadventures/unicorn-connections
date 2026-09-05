@@ -10,6 +10,7 @@ import {
 import { UsersService } from './users.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import type { UpdateProfileDto } from './dto/user.dto.js';
@@ -60,18 +61,18 @@ export class UsersController {
    * on any of these.
    */
   @Get(':userId')
-  getProfile(@Param('userId') userId: string) {
+  getProfile(@Param('userId', NumericIdPipe) userId: string) {
     return this.users.getProfile(userId);
   }
 
   @Get(':userId/class')
-  getUserClass(@Param('userId') userId: string) {
+  getUserClass(@Param('userId', NumericIdPipe) userId: string) {
     return this.users.getUserClass(userId);
   }
 
   @Put(':userId/profile')
   updateProfile(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @Body() body: UpdateProfileDto,
     @CurrentUser() user: AuthUser,
   ) {

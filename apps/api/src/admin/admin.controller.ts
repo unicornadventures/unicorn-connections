@@ -15,6 +15,7 @@ import { AdminService } from './admin.service.js';
 import { AdminGuard } from '../common/guards/admin.guard.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import type {
@@ -54,7 +55,7 @@ export class AdminController {
   @Get('classes/:classId/users')
   @UseGuards(SuperAdminGuard)
   listClassUsers(
-    @Param('classId') classId: string,
+    @Param('classId', NumericIdPipe) classId: string,
     @Query() query: Record<string, string>,
   ) {
     return this.admin.listClassUsers(classId, query);
@@ -64,7 +65,7 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(SuperAdminGuard)
   setClassAdmin(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @Body() body: SetClassAdminDto,
   ) {
     return this.admin.setClassAdmin(userId, body?.is_class_admin);
@@ -78,7 +79,7 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(AdminGuard)
   deleteUser(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @CurrentUser() user: AuthUser,
   ) {
     return this.admin.deleteUser(userId, user);
@@ -89,7 +90,7 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
   updateUserProfile(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @Body() body: UpdateAdminProfileDto,
     @CurrentUser() user: AuthUser,
   ) {
@@ -100,7 +101,7 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(SuperAdminGuard)
   moveUserClass(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @Body() body: MoveClassDto,
   ) {
     return this.admin.moveUserClass(userId, body?.class_id);
@@ -109,7 +110,7 @@ export class AdminController {
   @Post('users/:userId/password-link')
   @HttpCode(HttpStatus.OK)
   @UseGuards(SuperAdminGuard)
-  createPasswordLink(@Param('userId') userId: string) {
+  createPasswordLink(@Param('userId', NumericIdPipe) userId: string) {
     return this.admin.createPasswordLink(userId);
   }
 

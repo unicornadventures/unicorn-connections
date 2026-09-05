@@ -28,7 +28,7 @@ const AdminCommentsPage: React.FC = () => {
     if (!currentUser?.user_id) return;
     setLoading(true);
     try {
-      const response = await commentAPI.getAllPendingComments(currentUser.user_id);
+      const response = await commentAPI.getAllPendingComments();
       const comments: CommentWithProfile[] = (response.data.comments || []).map((c: any) => ({
         ...c,
         target_user_profile: { first_name: c.target_first_name, last_name: c.target_last_name }
@@ -46,7 +46,7 @@ const AdminCommentsPage: React.FC = () => {
   const handlePublishComment = async (commentId: number) => {
     setActionLoading(commentId);
     try {
-      await api.put(`/comments/${commentId}`, { published: true, requesterId: currentUser?.user_id });
+      await api.put(`/comments/${commentId}`, { published: true });
       setComments(comments.filter(c => c.id !== commentId));
       setError(null);
     } catch (err: any) {
@@ -61,9 +61,7 @@ const AdminCommentsPage: React.FC = () => {
     const commentId = deleteModal.id;
     setActionLoading(commentId);
     try {
-      await api.delete(`/comments/${commentId}`, {
-        params: { requesterId: currentUser?.user_id }
-      });
+      await api.delete(`/comments/${commentId}`);
       setComments(comments.filter(c => c.id !== commentId));
       setError(null);
       setDeleteModal({ isOpen: false, id: null });

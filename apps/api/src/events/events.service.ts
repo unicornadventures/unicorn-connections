@@ -132,9 +132,9 @@ export class EventsService {
    * with no rights who posts an incomplete body gets the 400, not the 403.
    * Faithful, and pinned by a contract test.
    *
-   * `location` is optional on the wire but NOT NULL in the schema, so omitting
-   * it makes the INSERT fail and the request 500. Another one the source has;
-   * see docs §18.
+   * `location` is required, and now says so (known-bugs #13). It is optional on
+   * the wire in the source but NOT NULL in the schema, so omitting it made the
+   * INSERT fail and the request 500 with nothing to say what was wrong.
    */
   async createEvent(
     schoolId: string,
@@ -149,6 +149,11 @@ export class EventsService {
         throw new BadRequestException({
           error: 'schoolId, classId, title, and event_date are required.',
         });
+      }
+      // Separate from the check above so the original message is untouched for
+      // the cases it already covered — only the new one gets new wording.
+      if (!location) {
+        throw new BadRequestException({ error: 'location is required.' });
       }
 
       await this.assertCanManage(authUser, classId);
@@ -166,7 +171,7 @@ export class EventsService {
         description: description || null,
         eventDate: date,
         eventTime: time,
-        location: location || null,
+        location,
       });
 
       return { event };

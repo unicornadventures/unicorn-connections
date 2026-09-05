@@ -1,5 +1,6 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { EventsService } from './events.service.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 
 /**
@@ -22,8 +23,8 @@ export class SchoolClassEventsController {
 
   @Get(':schoolId/classes/:classId/events')
   list(
-    @Param('schoolId') schoolId: string,
-    @Param('classId') classId: string,
+    @Param('schoolId', NumericIdPipe) schoolId: string,
+    @Param('classId', NumericIdPipe) classId: string,
   ) {
     return this.events.listEvents(schoolId, classId);
   }

@@ -44,7 +44,7 @@ test.describe('My Comments', () => {
   test('should disable posting until text is entered, then post a new comment', async ({ page }) => {
     // Registered before the narrower /comments route below: Playwright tries
     // the most recently added match first. The trailing ** is needed because
-    // the page sends ?requesterId=.
+    // the page sends a query string.
     await page.route('**/api/users/2**', (route) => {
       route.fulfill({
         status: 200,
@@ -106,7 +106,9 @@ test.describe('My Comments', () => {
 
     await expect(page.getByText('Updated text')).toBeVisible();
     await expect(page.getByText('Original text')).toHaveCount(0);
-    expect(putBody).toEqual({ content: 'Updated text', requesterId: 1 });
+    // No requesterId: identity comes from the bearer token, and the spoofable
+    // parameter the API always ignored is off the wire (known-bugs #9).
+    expect(putBody).toEqual({ content: 'Updated text' });
   });
 
   test('should cancel editing without saving changes', async ({ page }) => {
@@ -144,7 +146,8 @@ test.describe('My Comments', () => {
     await page.route('**/api/comments/1**', (route) => {
       if (route.request().method() === 'DELETE') {
         deleteRequested = true;
-        expect(route.request().url()).toContain('requesterId=1');
+        // Was `…toContain('requesterId=1')`. The client no longer sends it.
+        expect(route.request().url()).not.toContain('requesterId');
         route.fulfill({ status: 200, body: JSON.stringify({ message: 'Deleted' }) });
       } else {
         route.continue();

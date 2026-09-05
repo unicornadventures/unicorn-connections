@@ -1,6 +1,7 @@
 import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { EventsService } from './events.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import type { UpdateEventDto } from './dto/event.dto.js';
@@ -26,8 +27,8 @@ export class AdminEventsController {
 
   @Post(':schoolId/classes/:classId/events')
   create(
-    @Param('schoolId') schoolId: string,
-    @Param('classId') classId: string,
+    @Param('schoolId', NumericIdPipe) schoolId: string,
+    @Param('classId', NumericIdPipe) classId: string,
     @Body() body: UpdateEventDto,
     @CurrentUser() user: AuthUser,
   ) {

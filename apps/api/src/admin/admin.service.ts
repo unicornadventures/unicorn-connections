@@ -36,16 +36,10 @@ const DEFAULT_ROSTER_PAGE_SIZE = 10;
  * `/api/admin`, ported from `lambda/admin.ts`.
  *
  * **On transactions.** Two of these handlers wrap their writes in
- * `BEGIN`/`COMMIT` in the source. Those are not transactions: `db.ts`'s
+ * `BEGIN`/`COMMIT` in the source, and those are not transactions: `db.ts`'s
  * `query()` calls `pool.query()`, which checks out an arbitrary idle client per
  * statement, so the `BEGIN` and the `UPDATE` can land on different connections.
- * It usually appears to work because node-postgres hands back the
- * most-recently-released client, but nothing guarantees it, and under
- * concurrency it leaves a connection idle-in-transaction while the write goes
- * through unwrapped. The port therefore does not pretend: the statements run
- * as they actually run today, without the ceremony. Making them genuinely
- * atomic would be an improvement, and is filed in docs §9.2 rather than done
- * here, because it changes what a half-failed request leaves behind.
+ * They are genuinely atomic here, via `DatabaseService.withTransaction` (§21).
  */
 @Injectable()
 export class AdminService {
@@ -137,9 +131,9 @@ export class AdminService {
    * not block removing the account. The database delete cascades to the
    * profile, comments, memberships and tokens.
    *
-   * Gallery objects are **not** swept, only the two profile photos. That is the
-   * source's, and it means deleting a user orphans their gallery objects in S3.
-   * Recorded in docs §18.
+   * Sweeps the gallery as well as the two profile photos (known-bugs #11). The
+   * source swept only the profile photos, so a deleted user's gallery uploads
+   * stayed in the bucket forever with no row left to identify them.
    */
   async deleteUser(userId: string, authUser: AuthUser) {
     try {
@@ -153,12 +147,12 @@ export class AdminService {
 
       await this.assertCanManage(authUser, userIdNum);
 
-      const photos = await this.repo.findProfilePhotoKeys(userIdNum);
-      for (const key of [photos?.then_photo_url, photos?.now_photo_url]) {
-        if (!key) continue;
+      for (const key of await this.repo.findAllPhotoKeys(userIdNum)) {
         try {
           await this.s3.deleteObject(key);
         } catch (error) {
+          // Still swallowed: an object that will not delete must not make an
+          // account undeletable.
           this.logger.error(`Failed to delete S3 object ${key}`, error as Error);
         }
       }

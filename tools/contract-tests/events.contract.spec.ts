@@ -1,6 +1,10 @@
 import type { INestApplication } from '@nestjs/common';
 import { FIXTURE, authAs, closeFixturePool } from './src/fixtures.js';
-import { compare, type LegacyHandler } from './src/harness.js';
+import {
+  compare,
+  expectDivergence,
+  type LegacyHandler,
+} from './src/harness.js';
 import { createNestApp } from './src/nest-app.js';
 
 /**
@@ -467,11 +471,13 @@ describe('POST /api/admin/schools/:schoolId/classes/:classId/events', () => {
   });
 
   /**
-   * `location` is optional on the wire but NOT NULL in the schema, so omitting
-   * it fails the INSERT and 500s. Preserved bug-for-bug; docs §18.
+   * **Deliberate divergence** (known-bugs #13). `location` is optional on the
+   * wire and NOT NULL in the schema, so the source's INSERT failed and the
+   * request 500'd with nothing to say what was wrong. It is now rejected up
+   * front with the reason.
    */
-  it('500s identically when location is omitted', async () => {
-    const { legacy: a, nest: b } = await compare(app, legacy.createEventHandler, {
+  it('diverges: a missing location is now a 400, not a 500', async () => {
+    const observed = await compare(app, legacy.createEventHandler, {
       method: 'post',
       path,
       pathParameters,
@@ -479,10 +485,11 @@ describe('POST /api/admin/schools/:schoolId/classes/:classId/events', () => {
       body: { title: 'No location', event_date: '2031-05-01T18:00:00.000Z' },
     });
 
-    expect(b).toEqual(a);
-    expect(a).toEqual({
-      status: 500,
-      body: { error: 'Internal server error.' },
-    });
+    expect((observed.legacy as any).status).toBe(500);
+    expectDivergence(
+      observed,
+      { status: 400, body: { error: 'location is required.' } },
+      'known-bugs #13 — location is NOT NULL but was optional on the wire',
+    );
   });
 });

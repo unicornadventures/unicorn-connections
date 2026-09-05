@@ -1,6 +1,16 @@
 import type { INestApplication } from '@nestjs/common';
-import { FIXTURE, authAs, closeFixturePool } from './src/fixtures.js';
-import { compare, type LegacyHandler } from './src/harness.js';
+import {
+  FIXTURE,
+  authAs,
+  closeFixturePool,
+  resetFixture,
+} from './src/fixtures.js';
+import {
+  compare,
+  expectDivergence,
+  invokeNest,
+  type LegacyHandler,
+} from './src/harness.js';
 import { createNestApp } from './src/nest-app.js';
 
 /**
@@ -855,5 +865,75 @@ describe('POST /api/admin/schools/:schoolId/classes/:classId/users/import', () =
       status: 400,
       body: { error: 'Maximum 500 users per import.' },
     });
+  });
+});
+
+// ---- known-bugs fixes -------------------------------------------------------
+
+describe('known-bugs fixes', () => {
+  /**
+   * **Deliberate divergence** (known-bugs #10). The source's move INSERT
+   * supplied no `school_id`, so `GET /api/users/:id/class` reported a null
+   * school for anyone who had ever been moved. The school is now taken from the
+   * target class's own `class_school` link.
+   *
+   * Asserted through the *read* rather than the move, because the move's own
+   * response body is just a message and never showed the bug.
+   */
+  it('diverges: a moved user keeps a school on their membership', async () => {
+    await resetFixture();
+
+    await invokeNest(app, {
+      method: 'put',
+      path: `/api/admin/users/${FIXTURE.activeUser.id}/move-class`,
+      headers: asAdmin(),
+      body: { class_id: FIXTURE.otherClass.id },
+    });
+
+    const after = (await invokeNest(app, {
+      method: 'get',
+      path: `/api/users/${FIXTURE.activeUser.id}/class`,
+      headers: asAdmin(),
+    })) as { status: number; body: { class: { school_id: number | null } } };
+
+    expect(after.status).toBe(200);
+    // The source would have reported null here.
+    expect(after.body.class.school_id).toBe(FIXTURE.school.id);
+  });
+
+  /**
+   * **Deliberate divergence** (known-bugs #14). A non-numeric id used to reach
+   * Postgres, fail on `invalid input syntax for type integer`, and answer 500 —
+   * the server claiming it broke when the caller sent nonsense.
+   */
+  it('diverges: a non-numeric id is now a 400, not a 500', async () => {
+    const observed = await compare(app, legacy.deleteUserHandler, {
+      method: 'delete',
+      path: '/api/admin/users/abc',
+      pathParameters: { userId: 'abc' },
+      headers: asAdmin(),
+    });
+
+    expect((observed.legacy as any).status).toBe(500);
+    expectDivergence(
+      observed,
+      { status: 400, body: { error: 'Invalid id.' } },
+      'known-bugs #14 — non-numeric ids reached SQL',
+    );
+  });
+
+  /**
+   * `parseInt('1x')` is `1`, so a lenient check would have quietly served user
+   * 1 here. Worse than a 400, which is why the pipe's pattern is strict.
+   */
+  it('rejects a partially-numeric id rather than truncating it', async () => {
+    const observed = await compare(app, legacy.deleteUserHandler, {
+      method: 'delete',
+      path: `/api/admin/users/${FIXTURE.activeUser.id}x`,
+      pathParameters: { userId: `${FIXTURE.activeUser.id}x` },
+      headers: asAdmin(),
+    });
+
+    expect((observed.nest as any).status).toBe(400);
   });
 });

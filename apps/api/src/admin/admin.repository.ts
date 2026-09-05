@@ -151,6 +151,28 @@ export class AdminRepository {
     return result.rows[0];
   }
 
+  /**
+   * Every S3 key belonging to a user: both profile photos and every gallery
+   * upload (known-bugs #11 — the source swept only the two profile photos, so
+   * deleting a user orphaned their gallery objects forever).
+   *
+   * The gallery rows themselves go by FK cascade; this is only about the
+   * objects, which no cascade can reach.
+   */
+  async findAllPhotoKeys(userId: number): Promise<string[]> {
+    const result = await this.db.query<{ key: string | null }>(
+      `SELECT then_photo_url AS key FROM profiles WHERE user_id = $1
+       UNION ALL
+       SELECT now_photo_url  AS key FROM profiles WHERE user_id = $1
+       UNION ALL
+       SELECT s3_key         AS key FROM gallery_photos WHERE user_id = $1`,
+      [userId],
+    );
+    return result.rows
+      .map((row) => row.key)
+      .filter((key): key is string => !!key);
+  }
+
   /** Cascades to profile, comments, class_user and tokens via FK constraints. */
   async deleteUser(userId: number): Promise<void> {
     await this.db.query('DELETE FROM users WHERE id = $1', [userId]);
@@ -270,20 +292,26 @@ export class AdminRepository {
   /**
    * Moves a user by clearing every membership and inserting one.
    *
-   * The INSERT still supplies no `school_id`, so a moved user's membership
-   * loses the school context that `createRosterUser` sets, and
-   * `GET /api/users/:id/class` reports a null school for anyone who has been
-   * moved. That is the source's and remains unfixed — it was not among the four
-   * §9.2 items approved in §21, and unlike them it changes a response body.
+   * **Carries the school across** (known-bugs #10). The source's INSERT supplied
+   * no `school_id`, so a moved user's membership lost the context that
+   * `createRosterUser` sets and `GET /api/users/:id/class` reported a null
+   * school for anyone who had ever been moved.
+   *
+   * The school is taken from `class_school` — the target class's own link —
+   * rather than from the user's previous membership, because a move to a class
+   * at a different school should land at the new school, not keep the old one.
+   * A class linked to no school still yields NULL, which is the honest answer
+   * and matches what `createRosterUser` would store.
+   *
+   * Atomic for real (§21): the delete-then-insert pair must not be able to
+   * strand a user with no class membership at all.
    */
   async moveUserToClass(userId: number, classId: number): Promise<void> {
-    // Atomic for real (§9.2 fix): the delete-then-insert pair must not be able
-    // to strand a user with no class membership at all, which is what a failure
-    // between the two would previously have done.
     await this.db.withTransaction(async (query) => {
       await query('DELETE FROM class_user WHERE user_id = $1', [userId]);
       await query(
-        'INSERT INTO class_user (class_id, user_id) VALUES ($1, $2)',
+        `INSERT INTO class_user (class_id, user_id, school_id)
+         VALUES ($1, $2, (SELECT school_id FROM class_school WHERE class_id = $1 LIMIT 1))`,
         [classId, userId],
       );
     });

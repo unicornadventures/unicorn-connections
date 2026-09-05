@@ -143,7 +143,7 @@ verified to roll back and commit for real.
 
 ---
 
-## 🟡 9. `?requesterId=` is trivially spoofable
+## ⚪️ 9. `?requesterId=` is trivially spoofable — fixed
 
 **Affects:** the old app, and the frontend still sends it.
 
@@ -153,12 +153,14 @@ already ignore it where it matters most — `/directory`, `/photos` and
 looks, but the parameter is still on the wire.
 
 **Evidence:** §9.2 item 1.
-**Status:** open. Removing it needs a coordinated frontend change; the port
-already ignores it everywhere.
+**Status:** ⚪️ **fixed** — the parameter is off the wire. `apiClient.ts` no
+longer accepts or sends it and every call site was updated; the API already
+ignored it. Still spoofable against the old app's endpoints by anyone crafting
+a request directly, so this closes when that app retires.
 
 ---
 
-## 🟡 10. `move-class` drops the school context
+## ⚪️ 10. `move-class` drops the school context — fixed
 
 **Affects:** both apps.
 
@@ -166,12 +168,14 @@ The INSERT supplies no `school_id`, so a moved user's membership loses it and
 `GET /api/users/:id/class` reports a null school for anyone who has been moved.
 
 **Evidence:** §18.
-**Status:** open — reproduced faithfully. Fixing it changes a response body, so
-it wants its own decision.
+**Status:** ⚪️ **fixed** — the INSERT now takes the school from the target
+class's own `class_school` link, so a moved user lands at the new school rather
+than losing the context entirely. Pinned by a divergence test that moves a user
+and then reads their class back.
 
 ---
 
-## 🟡 11. Deleting a user orphans their gallery objects
+## ⚪️ 11. Deleting a user orphans their gallery objects — fixed
 
 **Affects:** both apps.
 
@@ -179,8 +183,10 @@ it wants its own decision.
 user's gallery uploads, which stay in S3 forever.
 
 **Evidence:** §18.
-**Status:** open. Storage hygiene rather than correctness — better addressed by
-a sweep than by widening the delete path.
+**Status:** ⚪️ **fixed** — `findAllPhotoKeys` returns the profile photos *and*
+every `gallery_photos.s3_key`, and the delete sweeps all of them. S3 failures
+are still swallowed individually so one stale key cannot make an account
+undeletable.
 
 ---
 
@@ -192,11 +198,16 @@ Every mint gets a fresh `Date.now()` suffix, so re-uploading a photo orphans the
 previous object. Nothing sweeps them; storage grows with every re-upload.
 
 **Evidence:** §17.
-**Status:** open, same category as #11.
+**Status:** **deliberately not fixed.** The obvious fix — delete the previous
+object when minting a new key — is worse than the bug. The key is recorded
+*before* the browser uploads, so deleting the old object at mint time destroys a
+user's existing photo whenever the upload is abandoned or fails. Losing a photo
+is worse than orphaning one. This wants a background sweep of unreferenced keys,
+which is a separate piece of work.
 
 ---
 
-## 🟡 13. Admin event creation 500s when `location` is omitted
+## ⚪️ 13. Admin event creation 500s when `location` is omitted — fixed
 
 **Affects:** both apps.
 
@@ -206,11 +217,15 @@ update and delete siblings — a member with no rights and an incomplete body ge
 the 400, not the 403.
 
 **Evidence:** §18.
-**Status:** open, reproduced and pinned by a contract test.
+**Status:** ⚪️ **`location` fixed** — it is rejected with
+`400 location is required.` instead of failing the INSERT. The
+validation-before-authorization ordering is **unchanged**: it is a contract
+nuance rather than a bug, and altering it would change which error an
+unauthorized caller sees.
 
 ---
 
-## 🟡 14. Non-numeric path parameters 500 instead of 400
+## ⚪️ 14. Non-numeric path parameters 500 instead of 400 — fixed
 
 **Affects:** both apps.
 
@@ -219,7 +234,15 @@ integer`, and answers 500. A `ParseIntPipe` would make it a 400 with different
 wording, so the port deliberately does not add one.
 
 **Evidence:** §15.
-**Status:** open. Cosmetic unless something starts alerting on 5xx rates.
+**Status:** ⚪️ **fixed** — `NumericIdPipe` rejects them with
+`400 Invalid id.` across all 46 id parameters. It validates without coercing,
+because every repository takes ids as strings by design (§3.3).
+
+Two things it deliberately gets strict about: `parseInt('1x')` is `1`, so a
+lenient check would have quietly served user 1 for `/api/users/1x`; and a
+digits-only string beyond `int4` still overflows in Postgres and produces the
+very 500 the pipe exists to prevent, so the range is bounded too. The second was
+caught by its own unit test rather than by reasoning.
 
 ---
 
@@ -234,6 +257,19 @@ wording, so the port deliberately does not add one.
 | `s3Service.updatePhotoUrlInDatabase` targets a table and column that do not exist — dead, not ported | §17 |
 | Express `reset-password` could never succeed; the deployed handler is correct | §14 |
 | `deploy.sh --dry-run` executed its changeset and created the stack | §22 |
+
+---
+
+---
+
+## Fixed on `fix/known-bugs`
+
+#9, #10, #11, #13 (the `location` half) and #14. Each changes behaviour, so each
+is pinned by an `expectDivergence` assertion in the contract suite — the port's
+new answer *and* the fact that it still differs from the source, so a later
+refactor that reverts a fix fails rather than passing quietly.
+
+#12 was examined and deliberately left: see its entry.
 
 ---
 

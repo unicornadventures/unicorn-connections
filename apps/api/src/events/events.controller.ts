@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { EventsService } from './events.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import type { UpdateEventDto } from './dto/event.dto.js';
@@ -32,14 +33,14 @@ export class EventsController {
   constructor(private readonly events: EventsService) {}
 
   @Get(':eventId')
-  getEvent(@Param('eventId') eventId: string) {
+  getEvent(@Param('eventId', NumericIdPipe) eventId: string) {
     return this.events.getEvent(eventId);
   }
 
   @Put(':eventId')
   @HttpCode(HttpStatus.OK)
   update(
-    @Param('eventId') eventId: string,
+    @Param('eventId', NumericIdPipe) eventId: string,
     @Body() body: UpdateEventDto,
     @CurrentUser() user: AuthUser,
   ) {
@@ -48,7 +49,7 @@ export class EventsController {
 
   @Delete(':eventId')
   @HttpCode(HttpStatus.OK)
-  remove(@Param('eventId') eventId: string, @CurrentUser() user: AuthUser) {
+  remove(@Param('eventId', NumericIdPipe) eventId: string, @CurrentUser() user: AuthUser) {
     return this.events.deleteEvent(eventId, user);
   }
 }

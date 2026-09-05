@@ -40,16 +40,18 @@ function serviceWith(
 }
 
 describe('AdminService.deleteUser', () => {
-  it('sweeps both profile photos before deleting the row', async () => {
+  it('sweeps every photo — profile and gallery — before deleting the row', async () => {
     const s3 = fakeS3();
     const order: string[] = [];
     const service = serviceWith(
       {
         userExists: async () => true,
-        findProfilePhotoKeys: async () => ({
-          then_photo_url: 'photos/then.jpg',
-          now_photo_url: 'photos/now.jpg',
-        }),
+        // Profile photos *and* gallery uploads (known-bugs #11).
+        findAllPhotoKeys: async () => [
+          'photos/then.jpg',
+          'photos/now.jpg',
+          'photos/gallery-1.jpg',
+        ],
         deleteUser: async () => {
           order.push('db');
         },
@@ -65,7 +67,13 @@ describe('AdminService.deleteUser', () => {
 
     await service.deleteUser('10', asUser());
 
-    expect(order).toEqual(['s3:photos/then.jpg', 's3:photos/now.jpg', 'db']);
+    expect(order).toEqual([
+      's3:photos/then.jpg',
+      's3:photos/now.jpg',
+      // The gallery object the source left orphaned.
+      's3:photos/gallery-1.jpg',
+      'db',
+    ]);
   });
 
   /**
@@ -77,10 +85,7 @@ describe('AdminService.deleteUser', () => {
     const service = serviceWith(
       {
         userExists: async () => true,
-        findProfilePhotoKeys: async () => ({
-          then_photo_url: 'photos/then.jpg',
-          now_photo_url: null,
-        }),
+        findAllPhotoKeys: async () => ['photos/then.jpg'],
         deleteUser: async () => {
           deleted = true;
         },
@@ -104,10 +109,7 @@ describe('AdminService.deleteUser', () => {
     const service = serviceWith(
       {
         userExists: async () => true,
-        findProfilePhotoKeys: async () => ({
-          then_photo_url: null,
-          now_photo_url: null,
-        }),
+        findAllPhotoKeys: async () => [],
         deleteUser: async () => {},
       },
       scopeAllowing(true),

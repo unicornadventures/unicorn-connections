@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { PhotosService } from './photos.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 
@@ -42,7 +43,7 @@ export class PhotosController {
   @Post(':userId/photo/:photoType')
   @HttpCode(HttpStatus.OK)
   createUploadUrl(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @Param('photoType') photoType: string,
     @CurrentUser() user: AuthUser,
   ) {
@@ -52,7 +53,7 @@ export class PhotosController {
   @Delete(':userId/photo/:photoType')
   @HttpCode(HttpStatus.OK)
   deletePhoto(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @Param('photoType') photoType: string,
     @CurrentUser() user: AuthUser,
   ) {
@@ -61,7 +62,7 @@ export class PhotosController {
 
   @Get(':userId/gallery')
   listGallery(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @CurrentUser() user: AuthUser,
   ) {
     return this.photos.listGallery(userId, user);
@@ -71,7 +72,7 @@ export class PhotosController {
   @Post(':userId/gallery')
   @HttpCode(HttpStatus.OK)
   createGalleryUploadUrl(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @Body() body: { caption?: unknown },
     @CurrentUser() user: AuthUser,
   ) {
@@ -81,8 +82,8 @@ export class PhotosController {
   @Put(':userId/gallery/:photoId')
   @HttpCode(HttpStatus.OK)
   updateCaption(
-    @Param('userId') userId: string,
-    @Param('photoId') photoId: string,
+    @Param('userId', NumericIdPipe) userId: string,
+    @Param('photoId', NumericIdPipe) photoId: string,
     @Body() body: { caption?: unknown },
     @CurrentUser() user: AuthUser,
   ) {
@@ -92,8 +93,8 @@ export class PhotosController {
   @Delete(':userId/gallery/:photoId')
   @HttpCode(HttpStatus.OK)
   deleteGalleryPhoto(
-    @Param('userId') userId: string,
-    @Param('photoId') photoId: string,
+    @Param('userId', NumericIdPipe) userId: string,
+    @Param('photoId', NumericIdPipe) photoId: string,
     @CurrentUser() user: AuthUser,
   ) {
     return this.photos.deleteGalleryPhoto(userId, photoId, user);

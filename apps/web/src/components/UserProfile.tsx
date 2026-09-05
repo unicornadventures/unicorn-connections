@@ -93,7 +93,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
       }
 
       try {
-        const galleryResponse = await galleryAPI.list(profileUserId!, currentUser!.user_id);
+        const galleryResponse = await galleryAPI.list(profileUserId!);
         setGalleryPhotos(galleryResponse.data.photos || []);
       } catch {
         setGalleryPhotos([]);
@@ -105,9 +105,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
       let allComments: Comment[] = [];
       if (canModerate) {
         try {
-          const pendingResponse = await api.get(`/users/${profileUserId}/comments/pending`, {
-            params: { requesterId: currentUser?.user_id }
-          });
+          const pendingResponse = await api.get(`/users/${profileUserId}/comments/pending`);
           allComments = pendingResponse.data.comments || [];
         } catch {
           const commentsResponse = await api.get(`/users/${profileUserId}/comments`);
@@ -136,9 +134,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
     setUploadingPhoto(photoType);
     try {
       // Step 1: get presigned upload URL from our API
-      const response = await api.post(`/users/${profileUserId}/photo/${photoType}`, undefined, {
-        params: { requesterId: currentUser?.user_id }
-      });
+      const response = await api.post(`/users/${profileUserId}/photo/${photoType}`, undefined);
       const { presignedUrl } = response.data;
 
       // Step 2: PUT the file directly to S3 using the presigned URL
@@ -163,9 +159,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
     if (!isOwnProfile) return;
     setUploadingPhoto(photoType);
     try {
-      await api.delete(`/users/${profileUserId}/photo/${photoType}`, {
-        params: { requesterId: currentUser?.user_id }
-      });
+      await api.delete(`/users/${profileUserId}/photo/${photoType}`);
       await fetchProfile();
       setError(null);
     } catch (err: any) {
@@ -215,7 +209,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
     if (!pendingUpload || !isOwnProfile || !profileUserId) return;
     setUploadingGallery(true);
     try {
-      const initRes = await galleryAPI.upload(profileUserId, currentUser!.user_id, uploadCaption.trim() || undefined);
+      const initRes = await galleryAPI.upload(profileUserId, uploadCaption.trim() || undefined);
       const { presignedUrl, id, key } = initRes.data;
       const putRes = await fetch(presignedUrl, {
         method: 'PUT',
@@ -224,7 +218,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
       });
       if (!putRes.ok) throw new Error(`S3 upload failed: ${putRes.status}`);
       setGalleryPhotos(prev => [...prev, { id, url: key, caption: uploadCaption.trim() || null, created_at: new Date().toISOString() }]);
-      const refreshed = await galleryAPI.list(profileUserId, currentUser!.user_id);
+      const refreshed = await galleryAPI.list(profileUserId);
       setGalleryPhotos(refreshed.data.photos || []);
       setError(null);
       cancelGalleryUpload();
@@ -244,7 +238,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
     if (!isOwnProfile || !profileUserId) return;
     setSavingCaption(true);
     try {
-      await galleryAPI.updateCaption(profileUserId, photoId, captionDraft.trim(), currentUser!.user_id);
+      await galleryAPI.updateCaption(profileUserId, photoId, captionDraft.trim());
       setGalleryPhotos(prev => prev.map(p => p.id === photoId ? { ...p, caption: captionDraft.trim() || null } : p));
       setEditingCaptionId(null);
       setError(null);
@@ -258,7 +252,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
   const handleGalleryDelete = async (photoId: number) => {
     if (!isOwnProfile || !profileUserId) return;
     try {
-      await galleryAPI.delete(profileUserId, photoId, currentUser!.user_id);
+      await galleryAPI.delete(profileUserId, photoId);
       setGalleryPhotos(prev => prev.filter(p => p.id !== photoId));
       setError(null);
     } catch (err: any) {
@@ -269,8 +263,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
   const handlePublishComment = async (commentId: number, shouldPublish: boolean) => {
     try {
       const response = await api.put(`/comments/${commentId}`, {
-        published: shouldPublish,
-        requesterId: currentUser?.user_id
+        published: shouldPublish
       });
       setComments(comments.map(c =>
         c.id === commentId ? { ...c, published: response.data.comment.published } : c
@@ -285,8 +278,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
     if (!editCommentText.trim()) return;
     try {
       const response = await api.put(`/comments/${commentId}`, {
-        content: editCommentText,
-        requesterId: currentUser?.user_id
+        content: editCommentText
       });
       setComments(comments.map(c =>
         c.id === commentId ? { ...c, ...response.data.comment } : c
@@ -301,9 +293,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
 
   const handleDeleteComment = async (commentId: number) => {
     try {
-      await api.delete(`/comments/${commentId}`, {
-        params: { requesterId: currentUser?.user_id }
-      });
+      await api.delete(`/comments/${commentId}`);
       setComments(comments.filter(c => c.id !== commentId));
       setError(null);
     } catch (err: any) {

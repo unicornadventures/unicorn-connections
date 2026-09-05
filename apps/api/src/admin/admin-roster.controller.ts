@@ -8,6 +8,7 @@ import {
 import { AdminService } from './admin.service.js';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard.js';
 import type { ImportUsersDto, RosterEntryDto } from './dto/admin.dto.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 
 /**
  * Roster creation, at `/api/admin/schools/:schoolId/classes/:classId/users`.
@@ -33,8 +34,8 @@ export class AdminRosterController {
   /** 201, and returns `{ created: <count>, skipped: [...] }`. */
   @Post(':schoolId/classes/:classId/users/import')
   importUsers(
-    @Param('schoolId') schoolId: string,
-    @Param('classId') classId: string,
+    @Param('schoolId', NumericIdPipe) schoolId: string,
+    @Param('classId', NumericIdPipe) classId: string,
     @Body() body: ImportUsersDto,
   ) {
     return this.admin.importUsers(schoolId, classId, body ?? {});
@@ -42,8 +43,8 @@ export class AdminRosterController {
 
   @Post(':schoolId/classes/:classId/users')
   createUser(
-    @Param('schoolId') schoolId: string,
-    @Param('classId') classId: string,
+    @Param('schoolId', NumericIdPipe) schoolId: string,
+    @Param('classId', NumericIdPipe) classId: string,
     @Body() body: RosterEntryDto,
   ) {
     return this.admin.createRosterUser(schoolId, classId, body ?? {});

@@ -138,7 +138,9 @@ describe('CommentSection Component', () => {
     await user.click(confirmButtons[confirmButtons.length - 1]);
 
     await waitFor(() => {
-      expect(api.default.delete).toHaveBeenCalledWith('/comments/1', { params: { requesterId: 2 } });
+      // No second argument: identity comes from the bearer token, and the
+      // spoofable ?requesterId= the API always ignored is off the wire.
+      expect(api.default.delete).toHaveBeenCalledWith('/comments/1');
     });
   });
 });

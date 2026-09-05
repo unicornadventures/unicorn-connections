@@ -1,5 +1,6 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { SchoolsService } from './schools.service.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 
 /**
@@ -31,7 +32,7 @@ export class SchoolsController {
 
   @Get(':schoolId')
   @UseGuards(JwtAuthGuard)
-  getSchool(@Param('schoolId') schoolId: string) {
+  getSchool(@Param('schoolId', NumericIdPipe) schoolId: string) {
     return this.schools.getSchool(schoolId);
   }
 }

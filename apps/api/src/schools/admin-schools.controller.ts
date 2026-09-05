@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { SchoolsService } from './schools.service.js';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 
 interface SchoolBodyDto {
   name?: string;
@@ -45,7 +46,7 @@ export class AdminSchoolsController {
   @Put(':schoolId')
   @HttpCode(HttpStatus.OK)
   update(
-    @Param('schoolId') schoolId: string,
+    @Param('schoolId', NumericIdPipe) schoolId: string,
     @Body() body: SchoolBodyDto,
   ) {
     return this.schools.updateSchool(
@@ -59,7 +60,7 @@ export class AdminSchoolsController {
   /** Deletes the school, every user at it, and their photos. */
   @Delete(':schoolId')
   @HttpCode(HttpStatus.OK)
-  remove(@Param('schoolId') schoolId: string) {
+  remove(@Param('schoolId', NumericIdPipe) schoolId: string) {
     return this.schools.deleteSchool(schoolId);
   }
 }

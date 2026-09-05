@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { CommentsService } from './comments.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import type { CreateCommentDto } from './dto/comment.dto.js';
@@ -34,7 +35,7 @@ export class UserCommentsController {
 
   /** Published comments only — what a visitor sees on the profile. */
   @Get(':userId/comments')
-  list(@Param('userId') userId: string) {
+  list(@Param('userId', NumericIdPipe) userId: string) {
     return this.comments.getComments(userId);
   }
 
@@ -43,14 +44,14 @@ export class UserCommentsController {
    * reason as `/pending` in CommentsController.
    */
   @Get(':userId/comments/pending')
-  listPending(@Param('userId') userId: string, @CurrentUser() user: AuthUser) {
+  listPending(@Param('userId', NumericIdPipe) userId: string, @CurrentUser() user: AuthUser) {
     return this.comments.getPendingComments(userId, user);
   }
 
   /** 201, and the comment starts unpublished. */
   @Post(':userId/comments')
   create(
-    @Param('userId') userId: string,
+    @Param('userId', NumericIdPipe) userId: string,
     @Body() body: CreateCommentDto,
     @CurrentUser() user: AuthUser,
   ) {

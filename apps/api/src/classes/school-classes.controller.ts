@@ -1,5 +1,6 @@
 import { Controller, Get, Param } from '@nestjs/common';
 import { ClassesService } from './classes.service.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 
 /**
  * `GET /api/schools/:schoolId/classes`.
@@ -20,7 +21,7 @@ export class SchoolClassesController {
   constructor(private readonly classes: ClassesService) {}
 
   @Get(':schoolId/classes')
-  listSchoolClasses(@Param('schoolId') schoolId: string) {
+  listSchoolClasses(@Param('schoolId', NumericIdPipe) schoolId: string) {
     return this.classes.listSchoolClasses(schoolId);
   }
 }

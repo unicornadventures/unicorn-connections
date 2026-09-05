@@ -41,7 +41,7 @@ const CommentSection: React.FC = () => {
     if (!editingText.trim()) { setError('Comment cannot be empty.'); return; }
     setSubmitting(true);
     try {
-      const response = await api.put(`/comments/${commentId}`, { content: editingText, requesterId: currentUser?.user_id });
+      const response = await api.put(`/comments/${commentId}`, { content: editingText });
       setComments(comments.map(c => c.id === commentId ? { ...c, ...response.data.comment } : c));
       setEditingId(null);
       setEditingText('');
@@ -57,9 +57,7 @@ const CommentSection: React.FC = () => {
     if (deleteModal.id === null) return;
     const commentId = deleteModal.id;
     try {
-      await api.delete(`/comments/${commentId}`, {
-        params: { requesterId: currentUser?.user_id }
-      });
+      await api.delete(`/comments/${commentId}`);
       setComments(comments.filter(c => c.id !== commentId));
       setError(null);
       setDeleteModal({ isOpen: false, id: null });

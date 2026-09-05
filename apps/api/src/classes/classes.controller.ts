@@ -1,6 +1,7 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ClassesService } from './classes.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 
@@ -27,25 +28,25 @@ export class ClassesController {
   }
 
   @Get(':classId/members')
-  getMembers(@Param('classId') classId: string) {
+  getMembers(@Param('classId', NumericIdPipe) classId: string) {
     return this.classes.getMembers(classId);
   }
 
   @Get(':classId/directory')
   getDirectory(
-    @Param('classId') classId: string,
+    @Param('classId', NumericIdPipe) classId: string,
     @CurrentUser() user: AuthUser,
   ) {
     return this.classes.getDirectory(classId, user);
   }
 
   @Get(':classId/photos')
-  getPhotos(@Param('classId') classId: string, @CurrentUser() user: AuthUser) {
+  getPhotos(@Param('classId', NumericIdPipe) classId: string, @CurrentUser() user: AuthUser) {
     return this.classes.getPhotos(classId, user);
   }
 
   @Get(':classId')
-  getClass(@Param('classId') classId: string) {
+  getClass(@Param('classId', NumericIdPipe) classId: string) {
     return this.classes.getClass(classId);
   }
 }

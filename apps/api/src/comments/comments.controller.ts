@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { CommentsService } from './comments.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
+import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import type { UpdateCommentDto } from './dto/comment.dto.js';
@@ -44,7 +45,7 @@ export class CommentsController {
 
   @Get('my-comments/:commenterId')
   getMyComments(
-    @Param('commenterId') commenterId: string,
+    @Param('commenterId', NumericIdPipe) commenterId: string,
     @CurrentUser() user: AuthUser,
   ) {
     return this.comments.getMyComments(commenterId, user);
@@ -53,7 +54,7 @@ export class CommentsController {
   @Put(':commentId')
   @HttpCode(HttpStatus.OK)
   update(
-    @Param('commentId') commentId: string,
+    @Param('commentId', NumericIdPipe) commentId: string,
     @Body() body: UpdateCommentDto,
     @CurrentUser() user: AuthUser,
   ) {
@@ -63,7 +64,7 @@ export class CommentsController {
   @Delete(':commentId')
   @HttpCode(HttpStatus.OK)
   remove(
-    @Param('commentId') commentId: string,
+    @Param('commentId', NumericIdPipe) commentId: string,
     @CurrentUser() user: AuthUser,
   ) {
     return this.comments.deleteComment(commentId, user);
