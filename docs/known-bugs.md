@@ -11,43 +11,66 @@ app they hit.
 | Affects | Meaning |
 |---|---|
 | 🔴 **live** | Broken in production right now |
+| 🟠 **live, degraded** | Works, but constrained or exposed |
 | 🟠 **live (old app only)** | Fixed in the port; still reachable through the Express/Lambda app until it is retired |
 | 🟡 **ported** | Reproduced deliberately in the new app, awaiting a decision |
 | ⚪️ **fixed** | Closed during the port; listed so it is not rediscovered |
 
 ---
 
-## 🔴 1. Password reset does not work for anyone
+## 🟠 1. SES quota is at sandbox limits; production access requested
 
-**Affects:** every user who has ever clicked "forgot password".
+**Affects:** password-reset and verification email at volume.
 
-The AWS account is in the **SES sandbox** (`ProductionAccessEnabled: false`).
-SES only delivers to *verified* recipients, and the only verified address on the
-account is the owner's. Every reset email to a real alumnus is rejected.
+**Corrected 2026-09-05.** This entry previously read "password reset does not
+work for anyone", on the strength of `ProductionAccessEnabled: false`. A test
+send disproved the strong form: SES **delivered** to
+`crgdncn+sestest@gmail.com`, an address absent from the identity list. Sending
+is not categorically blocked.
 
-The endpoint itself is fine — §14 confirmed the deployed handler looks the token
-up correctly. The token just never reaches anybody.
+What remains true is that the account reports sandbox-level limits:
 
-**Evidence:** §20. `aws sesv2 get-account --region us-east-1`.
-**Fix:** request SES production access. Support-ticket turnaround, measured in
-days, so start it early.
-**Note:** this compounds with #2 — the queue and worker faithfully hand the
-message to an SES call that fails.
+| Signal | Value |
+|---|---|
+| `ProductionAccessEnabled` | `false` |
+| `Max24HourSend` | 200/day |
+| `MaxSendRate` | 1/second |
+
+The two readings were never fully separated: either production access is active
+and the flag is stale, or SES normalised the `+sestest` label against the
+verified `crgdncn@gmail.com` and the account really is sandboxed. The decisive
+test needs a genuine third-party address — mailing a stranger, or deliberately
+hard-bouncing at a domain with no MX, which against a near-zero send history is
+how you *lose* production access. Neither was worth it, and the remedy is the
+same either way.
+
+**Action taken:** production access resubmitted via `PutAccountDetails`
+(2026-09-05). `ReviewDetails.Status` moved `GRANTED` → `PENDING`, which also
+clears the stale `GRANTED` that made the account state self-contradictory.
+
+**Still to do:** watch for the outcome. If granted, `ProductionAccessEnabled`
+flips true and the quota rises. 1/second is the constraint worth caring about —
+a class-wide reset event would queue behind it, and the SQS worker would throttle.
 
 ---
 
-## 🔴 2. No SES identity for `unicornconnections.org` — blocks phase 8
+## ⚪️ 2. No SES identity for `unicornconnections.org` — **resolved**
 
-**Affects:** will break the *existing* app the moment phase 8 lands.
+**Was:** phase 8 changes the old stack's `DomainName` to
+`unicornconnections.org`, which changes `SES_FROM_EMAIL` to
+`noreply@unicornconnections.org` — an identity that did not exist. Email from
+the existing app would have started failing the moment that deploy landed.
 
-Phase 8 changes the old stack's `DomainName` to `unicornconnections.org`, which
-changes `SES_FROM_EMAIL` to `noreply@unicornconnections.org` — an identity that
-does not exist in any form or region. Sending from the old app starts failing
-immediately.
+**Resolved 2026-09-05.** The domain is a verified SES identity with DKIM
+signing enabled, and SES accepts a send **as `noreply@unicornconnections.org`**
+— the exact sender phase 8 switches to. Proven, not assumed.
 
-**Evidence:** §20. Only `reunion-connect.org` and one address are verified.
-**Fix:** verify the domain identity (DNS records + DKIM) **before** phase 8.
-Propagation takes time; this is a prerequisite, not a step inside the phase.
+Three DKIM CNAMEs were added to zone `Z04780762C3Q0K0DKRGSP`. Purely additive:
+the zone had no MX, TXT or `_domainkey` records, and the A records serving the
+live site were untouched (both domains verified still-200 afterwards).
+Reversible by deleting the identity and those three records.
+
+**This unblocks phase 8.**
 
 ---
 
@@ -275,8 +298,9 @@ refactor that reverts a fix fails rather than passing quietly.
 
 ## Ordering suggestion
 
-1. **#1 and #2** — both have external lead time (support ticket, DNS
-   propagation) and #2 gates phase 8. Start them now; they need no code.
+1. ~~**#1 and #2**~~ — **done 2026-09-05.** #2 is resolved outright and phase 8
+   is unblocked. #1 was overstated and is corrected above; a production-access
+   request is submitted and pending.
 2. **#5 and #6** — the two security items. Already fixed in the port, so the
    real decision is whether to backport to the old app or accept the exposure
    until it retires. Retiring it sooner closes both.

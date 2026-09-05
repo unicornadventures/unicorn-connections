@@ -3,8 +3,9 @@
 **Target directory:** `/Users/crgdncn/Code/ClassYearNest`
 **Source of truth (read-only):** `/Users/crgdncn/Code/ClassYear`
 **Status:** phase 6 complete (2026-09-04) — API and web client both done. §13 phase 0, §14
-the contract decision, §15–§19 phases 2–6, §20 SES, §21 the §9.2 fixes, §22–§24 phase 7 and the shared
-database. **Phase 7 is deployed and its gate is met.** Only phase 8 remains.
+the contract decision, §15–§19 phases 2–6, §20 SES (**corrected by §25**), §21 the §9.2 fixes, §22–§24
+phase 7 and the shared database, §25 SES resolved. **Phase 7 is deployed and its
+gate is met, and phase 8 is unblocked.**
 
 > Open bugs live in [`known-bugs.md`](known-bugs.md). Two of them gate phase 8
 > and have external lead time — start those first.
@@ -1993,3 +1994,48 @@ means there is no initialization to hang on.
   distribution has only an S3 origin and no `/api` behaviour. If phase 8 wants
   same-origin `/api`, the distribution needs a second origin and cache
   behaviour.
+
+
+---
+
+## 25. SES resolved (2026-09-05)
+
+The two items §20 raised, closed out.
+
+### `unicornconnections.org` is verified — phase 8 is unblocked
+
+Created as an SES domain identity with DKIM signing; three CNAMEs added to zone
+`Z04780762C3Q0K0DKRGSP`. SES then accepted a send **as
+`noreply@unicornconnections.org`** — the sender the old app switches to when
+phase 8 changes its `DomainName`. The failure §20 predicted can no longer
+happen.
+
+The change was purely additive and verified as such: the zone had no MX, TXT or
+`_domainkey` records beforehand, the apex and `www` A records were untouched,
+and both live domains returned 200 immediately afterwards.
+
+### §20's sandbox claim was too strong
+
+§20 stated that "password reset almost certainly does not work in production for
+any real user", inferring it from `ProductionAccessEnabled: false`. A test send
+disproved the strong form: SES **delivered** to `crgdncn+sestest@gmail.com`, an
+address that is not in the identity list.
+
+That does not fully settle it. Either production access is active and the flag
+is stale, or SES matched the `+sestest` label against the verified
+`crgdncn@gmail.com`, in which case the account is sandboxed and the test proved
+nothing. Separating the two needs a genuine third-party recipient — mailing a
+stranger, or deliberately hard-bouncing at a domain with no MX, which against a
+near-zero send history is how an account *loses* production access. Neither is
+worth it when the remedy is identical either way.
+
+What is certainly true is the ceiling: 200 messages/day at 1/second. A
+class-wide reset event queues behind that and the SQS worker throttles. So
+production access was resubmitted via `PutAccountDetails`; `ReviewDetails.Status`
+moved `GRANTED` → `PENDING`, which incidentally clears the stale `GRANTED` that
+made the account's own reporting self-contradictory.
+
+`known-bugs.md` #1 is corrected to match. Worth recording *why* it was wrong: the
+inference from a boolean flag to a user-visible symptom was never tested, and one
+cheap experiment falsified it. The same applies to §20's framing, which is left
+in place with this section as its correction rather than rewritten.
