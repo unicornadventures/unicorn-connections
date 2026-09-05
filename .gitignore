@@ -20,3 +20,6 @@ playwright/.cache/
 # Lambda bundles, produced by scripts/bundle-lambda.sh
 infra/build/
 .aws-sam/
+
+# `sam package` output — CodeUri rewritten to S3 keys, regenerated per deploy
+infra/packaged.yaml

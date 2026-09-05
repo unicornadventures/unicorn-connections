@@ -2089,3 +2089,38 @@ bodies are identical here — the difference is in the bucket. So both sides are
 invoked by hand: the legacy handler leaves `then_photo_url`'s object in place,
 the port removes it. Unit tests pin the ordering, the same-millisecond case, and
 that a failed delete still returns a URL.
+
+### Deployed (2026-09-05)
+
+Live on `classyear-nest` at 02:10:33 UTC; `UPDATE_COMPLETE`, and the phase-7
+gate still passes (`/pulse` 200, `/api/schools` 200 against the shared database,
+unauthenticated `/api/users/1` 401, SPA 200, all four live names still on the
+old distribution `E26CKVNN5XEDQT`).
+
+**Deployed without `scripts/deploy.sh`,** which is worth recording because it is
+the first time. The script requires `JWTSecret` on the command line — it is
+`NoEcho`, so CloudFormation will not return it, and nobody had the value. Since
+this change is Lambda code only and no parameter changed, the deploy did not
+need it:
+
+```
+sam package --resolve-s3 --s3-prefix classyear-nest \
+  --template-file template.yaml --output-template-file packaged.yaml
+
+aws cloudformation update-stack --stack-name classyear-nest \
+  --template-body file://packaged.yaml \
+  --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
+  --parameters <all 14 with UsePreviousValue=true>
+```
+
+`sam deploy` has no `UsePreviousValue`; `aws cloudformation update-stack` does.
+The parameter list was generated from `describe-stacks` rather than typed, so a
+missing key could not silently reset a parameter to its default. The secret was
+never read, printed, or rotated — a rotation would have signed out every live
+session, since both apps share one database (§23).
+
+The route is worth keeping for any future code-only deploy. `deploy.sh` remains
+correct for anything that changes the template or a parameter.
+
+`infra/packaged.yaml` is now gitignored: `sam package` rewrites `CodeUri` to S3
+keys, so it is a per-deploy artifact, not source.
