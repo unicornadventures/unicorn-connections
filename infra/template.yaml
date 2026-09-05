@@ -49,7 +49,7 @@ Globals:
         ADMIN_SEED_PASSWORD_PARAM: !Ref AdminSeedPasswordParam
         FRONTEND_URL: !Sub 'https://${DomainName}'
         SES_FROM_EMAIL: !Sub 'noreply@${SesSenderDomain}'
-        S3_BUCKET_NAME: !Ref FileBucket
+        S3_BUCKET_NAME: !Ref FileBucketName
         FEEDBACK_ENABLED: !Ref FeedbackEnabled
         PASSWORD_RESET_QUEUE_URL: !Ref PasswordResetEmailQueue
 
@@ -127,6 +127,16 @@ Parameters:
     Type: String
     Default: class_reunion
 
+  FileBucketName:
+    Type: String
+    Default: classyear-file-storage-372666940943-dev
+    Description: >-
+      The EXISTING photo bucket, shared with the Express app for the same reason
+      the database is (docs section 27). Photo keys live in the shared database,
+      so a bucket of this stack's own holds none of the objects those rows name
+      and every photo 404s. Its CORS rules live in the old stack's template and
+      must list this app's origin, or presigned uploads fail their preflight.
+
   LambdaSecurityGroupId:
     Type: String
     Default: sg-02fa56b60b644cc22
@@ -181,7 +191,7 @@ Resources:
         - !Ref LambdaSecretsManagerPolicy
         - !Ref LambdaSESPolicy
         - S3CrudPolicy:
-            BucketName: !Sub 'classyear-nest-files-${AWS::AccountId}-${Environment}'
+            BucketName: !Ref FileBucketName
         - SQSSendMessagePolicy:
             QueueName: !GetAtt PasswordResetEmailQueue.QueueName
 
@@ -295,29 +305,28 @@ Resources:
             Resource: '*'
 
   # ---------------------------------------------------------------------------
-  # Storage
+  # Storage — SHARED with classyear-serverless, not created here (docs §27)
   # ---------------------------------------------------------------------------
-
-  FileBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      # `classyear-nest-files-...`, not `classyear-file-storage-...`: the old
-      # name is account+environment scoped and a second stack would fail on
-      # "bucket already exists" (§8.5).
-      BucketName: !Sub 'classyear-nest-files-${AWS::AccountId}-${Environment}'
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      CorsConfiguration:
-        CorsRules:
-          # The browser PUTs photos straight here with a presigned URL, so the
-          # bucket — not the API — is what needs the CORS rule (§17).
-          - AllowedOrigins: [!Sub 'https://${DomainName}']
-            AllowedMethods: [PUT, GET]
-            AllowedHeaders: ['*']
-            MaxAge: 3600
+  #
+  # There is no FileBucket resource for the same reason there is no RDSCluster:
+  # the photo keys live in the shared database, so a separate bucket forks the
+  # data exactly as a separate cluster would. This stack had its own
+  # `classyear-nest-files-...` bucket through phases 7–8, and the effect was
+  # that every photo 404'd — the keys in the shared `profiles` and
+  # `gallery_photos` rows named objects in the *other* bucket, and this app
+  # signed valid URLs against an empty one (§27).
+  #
+  # `FileBucketName` therefore points at the existing bucket. Two consequences
+  # worth knowing:
+  #
+  #   * The bucket's CORS rules belong to the old stack's template, so the
+  #     origin this app is served from has to be added *there* — a presigned
+  #     PUT is a browser request straight to S3 and the bucket is what answers
+  #     the preflight (§17). Serving a new domain without that change breaks
+  #     uploads while leaving display working.
+  #   * Deleting a photo here deletes it for both apps. That is the point —
+  #     they are one product — but it means known-bugs #12's delete-on-replace
+  #     now acts on shared objects.
 
   # ---------------------------------------------------------------------------
   # Database — SHARED with classyear-serverless, not created here (docs §23)
@@ -501,7 +510,8 @@ Outputs:
     Description: Invalidate after each frontend deploy
     Value: !Ref FrontendDistribution
   FileBucketName:
-    Value: !Ref FileBucket
+    Description: Shared with classyear-serverless — this stack does not own it
+    Value: !Ref FileBucketName
   DatabaseEndpoint:
     Description: Shared with classyear-serverless — this stack does not own it
     Value: !Ref DatabaseHost

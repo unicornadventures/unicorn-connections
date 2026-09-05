@@ -2124,3 +2124,80 @@ correct for anything that changes the template or a parameter.
 
 `infra/packaged.yaml` is now gitignored: `sam package` rewrites `CodeUri` to S3
 keys, so it is a per-deploy artifact, not source.
+
+---
+
+## 27. Photos 404'd: the bucket was never shared (2026-09-05)
+
+Every photo on `nest.reunion-connect.org` returned 404. The cause was one step
+past §23: the two apps were put on one **database**, and the **bucket** was
+never revisited.
+
+| Bucket | Contents |
+|---|---|
+| `classyear-file-storage-372666940943-dev` (old stack) | 50 objects, 90.4 MB — every real photo |
+| `classyear-nest-files-372666940943-nest` (this stack) | **0 objects**, all prefixes |
+
+`profiles.then_photo_url`, `now_photo_url` and `gallery_photos.s3_key` live in
+the *shared* database, so they name objects in the old bucket. This stack signed
+valid URLs for those keys against its own empty one. S3 answered `NoSuchKey`:
+
+```
+aws s3api head-object --bucket classyear-nest-files-372666940943-nest \
+  --key photos/3/37/374-now-mro6ucl1.jpg
+→ An error occurred (404) when calling the HeadObject operation: Not Found
+```
+
+**It was not a permissions problem**, which was the first guess and the natural
+one. A presigned URL whose authorization fails returns **403 AccessDenied**. 404
+is S3 reporting the key absent from the bucket addressed — the signature was
+never in question, and `S3CrudPolicy` already covered the bucket being signed
+against. The 403/404 split is the diagnostic: it separates "you may not" from
+"it is not there", and only the second was ever happening.
+
+### The fix
+
+`FileBucketName` is now a parameter pointing at the existing bucket, and the
+`FileBucket` resource is gone — for the same reason there is no `RDSCluster`
+(§23). A separate bucket forks the data exactly as a separate cluster would;
+the keys are shared, so the objects have to be.
+
+The changeset was reviewed before executing rather than applied blind, because
+it **removes** a bucket: `Remove FileBucket`, everything else `Modify`, no
+replacements. Safe only because that bucket was empty — verified immediately
+before, across all prefixes, not just `photos/`. CloudFormation cannot delete a
+non-empty bucket, so a stack update would have failed rather than destroyed
+anything, but that is a backstop and not a reason to skip looking.
+
+### What was at stake, and what was not
+
+Reads were broken, but the sharper risk was writes. An upload through the new
+app writes its key to the **shared** database while the object lands in the
+**nest** bucket — which 404s that photo on the *old* app too. The new site could
+break photos for old-app users. Nothing had: CloudWatch showed zero
+`createPhotoUploadUrl` calls.
+
+§26's delete-on-replace was suspected first, since it had deployed an hour
+earlier. It was not implicated. That code can only address `S3_BUCKET_NAME` —
+the empty nest bucket — so the 50 real objects were never reachable by it, and
+there were no `Failed to delete replaced S3 object` lines and no upload calls at
+all. Photos had been 404ing since phase 7 (§24), whose gate checked `/pulse`,
+`/api/schools`, auth and the SPA, but never an image. **That is the gap worth
+fixing**: four green checks and a live feature that had never once worked.
+
+Once the shared bucket is live, §26's delete does act on objects both apps can
+see. That is intended — they are one product — but it is a real widening, and it
+is why the template says so where someone changing it will look.
+
+### Still required: CORS on the old stack
+
+Uploads stay broken until `https://nest.reunion-connect.org` is added to the
+shared bucket's CORS rules, which live in the **old** repo's template — the
+bucket belongs to `classyear-serverless`. Written up in
+`docs/cors-change-for-classyear-repo.md`.
+
+The asymmetry there is a trap worth stating twice: displaying a photo is a plain
+`<img>` load and needs no CORS, while uploading is a presigned `PUT` from script
+and does. So photos will display correctly the moment this deploys, while
+uploads keep failing — same feature, different mechanism. A working image is not
+evidence that the CORS change has shipped.

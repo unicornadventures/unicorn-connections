@@ -32,6 +32,9 @@ SUBNET_2="${SUBNET_2:-subnet-08320caa36be4fa6c}"
 # the database rather than creating one — the two apps are one product on two
 # domains, and separate databases would fork the data (§23).
 DATABASE_HOST="${DATABASE_HOST:-classyear-dev.cluster-cezswsoi8m3o.us-east-1.rds.amazonaws.com}"
+# The EXISTING photo bucket, shared for the same reason (§27). A bucket of this
+# stack's own holds none of the objects the shared database's keys name.
+FILE_BUCKET_NAME="${FILE_BUCKET_NAME:-classyear-file-storage-372666940943-dev}"
 DATABASE_SECRET_ARN="${DATABASE_SECRET_ARN:-arn:aws:secretsmanager:us-east-1:372666940943:secret:rds!cluster-328925d7-720f-4ad3-9694-8c52236e81f2-yt8gVR}"
 LAMBDA_SECURITY_GROUP_ID="${LAMBDA_SECURITY_GROUP_ID:-sg-02fa56b60b644cc22}"
 
@@ -73,6 +76,7 @@ OVERRIDES=(
   "PrivateSubnet2=$SUBNET_2"
   "DatabaseHost=$DATABASE_HOST"
   "DatabaseSecretArn=$DATABASE_SECRET_ARN"
+  "FileBucketName=$FILE_BUCKET_NAME"
   "LambdaSecurityGroupId=$LAMBDA_SECURITY_GROUP_ID"
 )
 
