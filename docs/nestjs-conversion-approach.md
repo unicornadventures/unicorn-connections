@@ -3,8 +3,11 @@
 **Target directory:** `/Users/crgdncn/Code/ClassYearNest`
 **Source of truth (read-only):** `/Users/crgdncn/Code/ClassYear`
 **Status:** phase 6 complete (2026-09-04) — API and web client both done. §13 phase 0, §14
-the contract decision, §15–§19 phases 2–6, §20 SES, §21 the approved §9.2 fixes, §22 phase 7.
-Phase 7 is built and changeset-verified but **not deployed**; phase 8 remains.
+the contract decision, §15–§19 phases 2–6, §20 SES, §21 the §9.2 fixes, §22–§24 phase 7 and the shared
+database. **Phase 7 is deployed and its gate is met.** Only phase 8 remains.
+
+> Open bugs live in [`known-bugs.md`](known-bugs.md). Two of them gate phase 8
+> and have external lead time — start those first.
 
 > **Before phase 8:** the `unicornconnections.org` SES identity does not exist and the
 > account is in the SES sandbox (§20). Both are lead-time items on that phase's critical
@@ -725,7 +728,7 @@ Each phase ends at a green gate. Nothing merges past a red contract test.
 | **4** ✅ | `PhotosModule` + S3 (**no multipart — none is deployed, §17**) | Upload/delete verified against a real object store; binary handling n/a — see §17 |
 | **5** ✅ | `AdminModule` + `adminSchools`/`adminClasses`/`adminEvents` incl. CSV import + bulk link | Full contract suite green — see §18 |
 | **6** ✅ | Frontend: copy `frontend/` across, point `VITE_API_BASE_URL` at the Nest server | Vitest + Playwright green; a live-API smoke suite covers the "against Nest" half — see §19 |
-| **7** ◐ | Deployment: minimal SAM template, single proxy function, warmer, email worker; new stack `classyear-nest`, own Aurora cluster, served at `nest.reunion-connect.org` (§8.6) | **Built and changeset-verified, not yet deployed** — see §22 |
+| **7** ✅ | Deployment: minimal SAM template, single proxy function, warmer, email worker; new stack `classyear-nest`, **shared** database (§23), served at `nest.reunion-connect.org` | Gate met — see §24 |
 | **8** | Domain split (§8.6): verify SES identity for `noreply@unicornconnections.org` → old stack drops to `unicornconnections.org` only → new stack claims `reunion-connect.org` + `www` | `unicornconnections.org` serves the old app, `reunion-connect.org` serves the new app, both HTTP 200 with valid certs; password reset sends correctly from both |
 | **9** | *Later, optional, separately approved* — move `unicornconnections.org` to the new app too and retire the old stack | — |
 
@@ -1840,3 +1843,153 @@ still served by `classyear-serverless`.
    boot.
 3. `/classyear/nest/admin-seed-password` in SSM if admin seeding is wanted;
    seeding is skipped when the parameter is absent.
+
+---
+
+## 23. The two apps share one database (2026-09-04)
+
+Decided after phase 7 was built, when the question "can it share the other
+app's database?" surfaced something §8.5 had not considered.
+
+### Why §8.5 was wrong
+
+§8.5 gave the new stack its own Aurora cluster, reasoning that "work on each
+independently" means a migration or a bad write in one must not break the other.
+That is sound in isolation and wrong for this system, because **the two domains
+are one product**.
+
+With separate databases, §8.6's end state — old app on
+`unicornconnections.org`, new app on `reunion-connect.org`, both live — is a
+**data fork**. Someone who signs up or uploads a photo on one domain does not
+exist on the other. A snapshot-restore additionally loses every write between
+the snapshot and the cutover. Neither is acceptable for one product.
+
+So the new stack points at the existing cluster:
+`classyear-dev.cluster-….rds.amazonaws.com`. There is no `RDSCluster`,
+`RDSWriterInstance`, `DBSubnetGroup` or `DBSecurityGroup` in `infra/template.yaml`.
+
+### What makes it safe
+
+**The schemas are byte-identical.** That is the phase 0 gate and it re-runs on
+every `npm run schema:verify` — 78 statements, zero diff. This decision is only
+available *because* that gate exists and has held for seven phases.
+
+**Only one app owns the schema.** `RUN_MIGRATIONS=false` stands the new one
+down. Both running `CREATE TABLE IF NOT EXISTS` concurrently is not safe: the
+existence check and the create are not atomic, so two cold starts racing can
+raise a duplicate-key error on `pg_class`. §9.1 made `SchemaService` *rethrow*
+where the source only logs — so the app that would die of that race is this one.
+Standing down removes the race rather than papering over it.
+
+**No change to the live stack.** The cluster's security group admits 5432 from
+the old app's Lambda security group only. Rather than adding an ingress rule —
+which would mean editing the stack phase 8 is supposed to be the only one to
+touch — the new functions **join that group**, referenced by id.
+
+### What it costs
+
+The two §21 security fixes are ineffective while both apps are live on the same
+data: `GET /api/users` and `GET /api/photos/presigned` are still open through the
+old app. That is not a regression — the exposure is exactly what it was
+yesterday — but the fixes do not *help* until the old app retires. Recorded in
+`known-bugs.md` as items 5 and 6.
+
+Connection pressure is worth watching. `MinCapacity: 0`, `MaxCapacity: 2`, and
+`max_connections` scales with ACU; two Lambda fleets' pools against that is the
+same class of thing that produced the intermittent phase-5 failures.
+
+---
+
+## 24. Phase 7 — deployed (2026-09-05)
+
+### The gate
+
+```
+✅ GET /pulse                                    200
+✅ GET /api/schools (public, hits the database)  200
+✅ GET /api/users/1 unauthenticated is refused   401
+✅ frontend over HTTPS                           200
+
+reunion-connect.org            HTTP 200   ← old app
+www.reunion-connect.org        HTTP 200   ← old app
+unicornconnections.org         HTTP 200   ← old app
+www.unicornconnections.org     HTTP 200   ← old app
+
+✅ Phase 7 gate: new stack answers, both live domains untouched.
+```
+
+`https://nest.reunion-connect.org` serves the SPA; the API is at
+`https://9sekyrxcz5.execute-api.us-east-1.amazonaws.com/nest`. `GET /api/schools`
+returns real production rows, so the port is serving live data.
+
+### A deploy happened before it was meant to
+
+`scripts/deploy.sh --dry-run` passes `--no-execute-changeset`. It created the
+stack anyway: `REVIEW_IN_PROGRESS` at 10:19:58, `CREATE_IN_PROGRESS` 25 seconds
+later, `CREATE_COMPLETE` at 10:27:56. The likely cause is
+`confirm_changeset = true` in `samconfig.toml` auto-confirming against a non-TTY
+stdin — an interactive prompt is not a safety control when nothing is attached
+to stdin.
+
+Worse than the deploy was the reporting: §22 was written stating the stack was
+not deployed and the account was untouched, on the strength of a `delete-stack`
+whose effect was never re-verified.
+
+Two changes came out of it:
+
+- `confirm_changeset = false`, and `--dry-run` now passes
+  `--no-confirm-changeset` alongside `--no-execute-changeset`.
+- `--dry-run` **asserts its own outcome**: it queries the stack status
+  afterwards and complains loudly if it is anything other than absent or
+  `REVIEW_IN_PROGRESS`. Claiming a thing did not happen is not the same as
+  checking.
+
+The design held where it mattered: the stack only ever claimed
+`nest.reunion-connect.org`, and all four live names stayed on the old
+distribution throughout.
+
+### No data was lost
+
+The accidental deploy created its own empty cluster, `classyear-nest-nest`. The
+shared-database update deleted it. Three confirmations that nothing of value
+went with it:
+
+1. `classyear-dev`, the live cluster, is untouched — created 2026-07-07, still
+   `available`. The new stack references it by *parameter*; CloudFormation
+   cannot delete a resource that is not in its stack.
+2. The deleted cluster was created fresh with no snapshot restore, and the app
+   timed out during `🔨 Starting database initialization…` — it never finished
+   creating tables, let alone rows.
+3. `DeletionPolicy: Snapshot` took a final snapshot anyway:
+   `classyear-nest-snapshot-rdscluster-chbrcee48b50`.
+
+### The 504 that the shared database fixed
+
+Before the update, `/pulse` returned 504 and the logs showed why:
+
+```
+[SchemaService] 🔨 Starting database initialization...
+REPORT Duration: 30000.00 ms  Status: timeout
+```
+
+The function booted and mapped every route, then hung initializing the schema
+against its own brand-new, paused Aurora cluster and hit the 30s timeout. Both
+halves of §23 remove it: the shared cluster is warm, and `RUN_MIGRATIONS=false`
+means there is no initialization to hang on.
+
+### Notes for phase 8
+
+- **#1 and #2 in `known-bugs.md` gate this phase**, and both have external lead
+  time. The SES sandbox affects the existing app today; the missing
+  `unicornconnections.org` identity will break it the moment `DomainName`
+  changes.
+- The certificate covers only `nest.reunion-connect.org`. A certificate's domain
+  list is immutable, so phase 8 needs a replacement covering the apex and `www`
+  — §8.6's "two ACM certificate replacements".
+- `deploy.sh` refuses an apex `DOMAIN_NAME` outright. That guard has to be
+  relaxed deliberately as part of phase 8, after the old stack releases the
+  alias — a CloudFront alias is exclusive to one distribution account-wide.
+- The frontend is built against the API Gateway URL absolutely, because this
+  distribution has only an S3 origin and no `/api` behaviour. If phase 8 wants
+  same-origin `/api`, the distribution needs a second origin and cache
+  behaviour.

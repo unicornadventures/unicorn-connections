@@ -15,7 +15,10 @@ region = "us-east-1"
 s3_prefix = "classyear-nest"
 resolve_s3 = true
 capabilities = "CAPABILITY_IAM"
-confirm_changeset = true
+# false, deliberately. This was `true`, and a `--dry-run` still executed its
+# changeset — an interactive prompt against a non-TTY stdin is not a safety
+# control. The control is now explicit flags in scripts/deploy.sh.
+confirm_changeset = false
 
 # Stack parameters are NOT here. `sam deploy --parameter-overrides` *replaces*
 # this list rather than merging with it, and JWTSecret has to come from the

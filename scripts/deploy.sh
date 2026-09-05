@@ -27,7 +27,13 @@ SES_SENDER_DOMAIN="${SES_SENDER_DOMAIN:-reunion-connect.org}"
 VPC_ID="${VPC_ID:-vpc-021940e171925bd53}"
 SUBNET_1="${SUBNET_1:-subnet-0dfdb663652cba578}"
 SUBNET_2="${SUBNET_2:-subnet-08320caa36be4fa6c}"
-SNAPSHOT_IDENTIFIER="${SNAPSHOT_IDENTIFIER:-}"
+
+# The EXISTING cluster and the security group that reaches it. This stack shares
+# the database rather than creating one — the two apps are one product on two
+# domains, and separate databases would fork the data (§23).
+DATABASE_HOST="${DATABASE_HOST:-classyear-dev.cluster-cezswsoi8m3o.us-east-1.rds.amazonaws.com}"
+DATABASE_SECRET_ARN="${DATABASE_SECRET_ARN:-arn:aws:secretsmanager:us-east-1:372666940943:secret:rds!cluster-328925d7-720f-4ad3-9694-8c52236e81f2-yt8gVR}"
+LAMBDA_SECURITY_GROUP_ID="${LAMBDA_SECURITY_GROUP_ID:-sg-02fa56b60b644cc22}"
 
 if [ -z "${JWT_SECRET:-}" ]; then
   echo "JWT_SECRET is required (NoEcho in the template, never committed)." >&2
@@ -65,19 +71,33 @@ OVERRIDES=(
   "VPC=$VPC_ID"
   "PrivateSubnet1=$SUBNET_1"
   "PrivateSubnet2=$SUBNET_2"
+  "DatabaseHost=$DATABASE_HOST"
+  "DatabaseSecretArn=$DATABASE_SECRET_ARN"
+  "LambdaSecurityGroupId=$LAMBDA_SECURITY_GROUP_ID"
 )
-# Only when set: an empty override is not the same as taking the default, and
-# an empty SnapshotIdentifier would be read as "restore from a snapshot named ''".
-[ -n "$SNAPSHOT_IDENTIFIER" ] && OVERRIDES+=("SnapshotIdentifier=$SNAPSHOT_IDENTIFIER")
 
 if $DRY_RUN; then
   echo "==> Creating a changeset only (nothing will be executed)"
-  sam deploy --no-execute-changeset --parameter-overrides "${OVERRIDES[@]}"
+  # Both flags. --no-execute-changeset alone was not enough: with
+  # confirm_changeset=true in samconfig, a dry-run created the stack anyway.
+  sam deploy --no-execute-changeset --no-confirm-changeset \
+    --parameter-overrides "${OVERRIDES[@]}"
+
+  # Trust nothing: report what actually exists afterwards. A dry-run should
+  # leave the stack absent or REVIEW_IN_PROGRESS — anything else means it ran.
+  status="$(aws cloudformation describe-stacks --stack-name classyear-nest \
+    --region us-east-1 --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo ABSENT)"
+  echo
+  echo "==> Stack status after dry-run: $status"
+  case "$status" in
+    ABSENT | REVIEW_IN_PROGRESS) ;;
+    *) echo "    ^ NOT a dry-run outcome. The changeset was executed." >&2 ;;
+  esac
   exit 0
 fi
 
-echo "==> Deploying"
-sam deploy --parameter-overrides "${OVERRIDES[@]}"
+echo "==> Deploying (this executes — no prompt)"
+sam deploy --no-confirm-changeset --parameter-overrides "${OVERRIDES[@]}"
 
 echo
 echo "==> Outputs"

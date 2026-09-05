@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from './database.service.js';
 
 /**
@@ -13,14 +14,35 @@ import { DatabaseService } from './database.service.js';
  * One deliberate divergence from the source (see docs §9.1): the original
  * caught its own errors and only logged them, so a failed migration left the
  * app serving requests against a half-built schema. This rethrows.
+ *
+ * **`RUN_MIGRATIONS=false` skips initialization entirely.** This app shares its
+ * database with the Express app (docs §23) and only one of them may own the
+ * schema. Both running `CREATE TABLE IF NOT EXISTS` concurrently is not safe:
+ * the `IF NOT EXISTS` check and the create are not atomic, so two cold starts
+ * racing can raise a duplicate-key error on `pg_class`. The rethrow above then
+ * makes that fatal *here* while the source merely logs it — so the app that
+ * fails is this one. Letting the older app keep the schema, and standing down,
+ * removes the race rather than papering over it.
  */
 @Injectable()
 export class SchemaService implements OnModuleInit {
   private readonly logger = new Logger(SchemaService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly config: ConfigService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
+    if (!this.config.get<boolean>('runMigrations')) {
+      // Logged, not silent: an app that is not maintaining its own schema is
+      // something you want to see stated at boot rather than infer later.
+      this.logger.log(
+        '⏭  RUN_MIGRATIONS=false — schema owned elsewhere, skipping initialization.',
+      );
+      return;
+    }
+
     await this.initialize();
   }
 

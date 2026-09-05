@@ -4,10 +4,14 @@ A NestJS port of the [ClassYear](../ClassYear) class-reunion platform. The conve
 including the full endpoint inventory and the phased migration, lives in
 [`docs/nestjs-conversion-approach.md`](docs/nestjs-conversion-approach.md).
 
-**Status: phase 6 complete — API and web client both done.** 64 endpoints across `/pulse`,
-`/api/auth`, `/api/users`, `/api/schools`, `/api/classes`, `/api/comments`, `/api/events`,
-`/api/feedback`, `/api/photos` and `/api/admin`, plus the React SPA in `apps/web`. What
-remains is deployment (phase 7) and the domain split (8).
+**Status: phase 7 deployed.** 64 endpoints plus the React SPA, live at
+[nest.reunion-connect.org](https://nest.reunion-connect.org) and reading the production
+database. Both live domains are still served by the old app — that is half the phase gate,
+and `./scripts/smoke-deployed.sh` checks it. Only the domain split (phase 8) remains.
+
+**Open bugs are in [`docs/known-bugs.md`](docs/known-bugs.md).** Two of them gate phase 8
+and have external lead time (an SES production-access ticket and a DNS-verified domain
+identity), so they are worth starting before any more code.
 
 Every one of those is checked against the deployed Lambda handler by the contract suite —
 `npm run contract:verify`. That gate, not the unit tests, is what makes the port safe.
@@ -170,6 +174,9 @@ the root; target one with `--workspace @classyear/api`.
 - **`/pulse` is the only route outside `/api`.** The global prefix excludes it, matching the
   source, where the SAM warmer hits it at the root.
 - **Raw SQL, no ORM.** Deliberate; see §3.3 of the conversion doc.
+- **The two apps share one database.** They are one product on two domains, so separate
+  clusters would fork the data (§23). The new app runs with `RUN_MIGRATIONS=false` — only
+  one app may own the schema, and the older one keeps it.
 - **The deployed Lambda handlers are the contract, not the Express routers.** Where the two
   disagree — response shape, error wording, whether a check exists at all — the handler
   wins, because that is what production serves. §14 of the conversion doc has the evidence.

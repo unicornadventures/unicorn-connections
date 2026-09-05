@@ -71,6 +71,10 @@ export const envSchema = z
     PASSWORD_RESET_QUEUE_URL: z.string().optional(),
 
     FEEDBACK_ENABLED: z.enum(['true', 'false']).default('true'),
+
+    // Whether this instance owns the schema. Two apps sharing one database must
+    // not both run migrations — see SchemaService.
+    RUN_MIGRATIONS: z.enum(['true', 'false']).default('true'),
   })
   .superRefine((env, ctx) => {
     if (env.DATABASE_SECRET_ARN) return;
@@ -143,6 +147,7 @@ export interface AppConfig {
   frontendUrl: string;
   awsRegion: string;
   feedbackEnabled: boolean;
+  runMigrations: boolean;
   adminSeedPasswordParam?: string;
   passwordResetQueueUrl?: string;
   database: DatabaseConfig;
@@ -165,6 +170,9 @@ export const configuration = (): AppConfig => {
     // Compared as a string, matching the Express app: only the literal 'false'
     // disables the feedback module; anything else leaves it on.
     feedbackEnabled: env.FEEDBACK_ENABLED !== 'false',
+    // Same 'only the literal false disables it' rule as the feedback flag, so
+    // the two behave alike and a typo fails safe (migrations still run).
+    runMigrations: env.RUN_MIGRATIONS !== 'false',
     adminSeedPasswordParam: env.ADMIN_SEED_PASSWORD_PARAM,
     passwordResetQueueUrl: env.PASSWORD_RESET_QUEUE_URL,
     database: {

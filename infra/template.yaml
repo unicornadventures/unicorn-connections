@@ -35,11 +35,16 @@ Globals:
     Environment:
       Variables:
         NODE_ENV: production
-        DB_HOST: !GetAtt RDSCluster.Endpoint.Address
+        DB_HOST: !Ref DatabaseHost
         DB_PORT: '5432'
-        DB_NAME: class_reunion
+        DB_NAME: !Ref DatabaseName
         DB_USER: classyear_admin
-        DATABASE_SECRET_ARN: !GetAtt RDSCluster.MasterUserSecret.SecretArn
+        DATABASE_SECRET_ARN: !Ref DatabaseSecretArn
+        # This app shares the Express app's database and does NOT own the schema
+        # (docs §23). Both running CREATE TABLE IF NOT EXISTS concurrently can
+        # race on pg_class, and SchemaService rethrows where the source only
+        # logs — so the app that would die is this one.
+        RUN_MIGRATIONS: 'false'
         JWT_SECRET: !Ref JWTSecret
         ADMIN_SEED_PASSWORD_PARAM: !Ref AdminSeedPasswordParam
         FRONTEND_URL: !Sub 'https://${DomainName}'
@@ -104,16 +109,33 @@ Parameters:
     Type: AWS::EC2::Subnet::Id
   PrivateSubnet2:
     Type: AWS::EC2::Subnet::Id
-  SnapshotIdentifier:
+  DatabaseHost:
     Type: String
-    Default: ''
+    Default: classyear-dev.cluster-cezswsoi8m3o.us-east-1.rds.amazonaws.com
     Description: >-
-      Optional Aurora snapshot to restore from. §8.5 wants this stack's cluster
-      seeded from a snapshot of the live one so the data is realistic and neither
-      app can mutate the other's. Empty creates an empty cluster.
+      Writer endpoint of the EXISTING Aurora cluster. This stack shares the
+      Express app's database rather than creating its own: the two are one
+      product on two domains, and separate databases would fork the data (docs
+      section 23). The schemas are byte-identical, which the schema parity gate
+      re-proves on every run.
 
-Conditions:
-  RestoreFromSnapshot: !Not [!Equals [!Ref SnapshotIdentifier, '']]
+  DatabaseSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for that cluster's master credentials
+
+  DatabaseName:
+    Type: String
+    Default: class_reunion
+
+  LambdaSecurityGroupId:
+    Type: String
+    Default: sg-02fa56b60b644cc22
+    Description: >-
+      The EXISTING app's Lambda security group, reused rather than recreated.
+      The cluster's security group admits 5432 from this group only, so joining
+      it is what lets these functions reach the database WITHOUT modifying the
+      live stack — which matters, since phase 8 is meant to be the only phase
+      that touches it.
 
 Resources:
 
@@ -138,7 +160,7 @@ Resources:
       CodeUri: build/api/
       Handler: index.handler
       VpcConfig:
-        SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        SecurityGroupIds: [!Ref LambdaSecurityGroupId]
         SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
       Events:
         # Every route the app serves, including /pulse at the root. Nest's
@@ -244,7 +266,7 @@ Resources:
         Statement:
           - Effect: Allow
             Action: secretsmanager:GetSecretValue
-            Resource: !GetAtt RDSCluster.MasterUserSecret.SecretArn
+            Resource: !Ref DatabaseSecretArn
           - Effect: Allow
             Action: ssm:GetParameter
             Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/classyear/*'
@@ -298,75 +320,40 @@ Resources:
             MaxAge: 3600
 
   # ---------------------------------------------------------------------------
-  # Database — its own cluster, not shared with classyear-serverless (§8.5)
+  # Database — SHARED with classyear-serverless, not created here (docs §23)
   # ---------------------------------------------------------------------------
+  #
+  # The two apps are one product on two domains. Separate clusters would fork
+  # the data: someone who signs up on unicornconnections.org would not exist on
+  # reunion-connect.org, and a snapshot-restore would additionally lose every
+  # write between the snapshot and the cutover. So there is no RDSCluster,
+  # RDSWriterInstance, DBSubnetGroup or DBSecurityGroup here — DatabaseHost and
+  # DatabaseSecretArn point at the existing one.
+  #
+  # Two things make that safe:
+  #   * The schemas are byte-identical. That is the phase 0 gate and it re-runs
+  #     on every `npm run schema:verify` — 78 statements, zero diff.
+  #   * Only one app owns the schema. RUN_MIGRATIONS=false above stands this one
+  #     down; the Express app keeps running its own initialization.
+  #
+  # There is also no LambdaSecurityGroup: these functions join the existing
+  # app's group (LambdaSecurityGroupId), which is what the cluster already
+  # admits, so nothing about the live stack has to change.
 
-  RDSCluster:
-    Type: AWS::RDS::DBCluster
-    DeletionPolicy: Snapshot
-    UpdateReplacePolicy: Snapshot
-    Properties:
-      DBClusterIdentifier: !Sub 'classyear-nest-${Environment}'
-      Engine: aurora-postgresql
-      EngineVersion: '17.9'
-      DatabaseName: !If [RestoreFromSnapshot, !Ref 'AWS::NoValue', class_reunion]
-      MasterUsername: !If [RestoreFromSnapshot, !Ref 'AWS::NoValue', classyear_admin]
-      ManageMasterUserPassword: !If [RestoreFromSnapshot, !Ref 'AWS::NoValue', true]
-      SnapshotIdentifier: !If [RestoreFromSnapshot, !Ref SnapshotIdentifier, !Ref 'AWS::NoValue']
-      StorageEncrypted: true
-      ServerlessV2ScalingConfiguration:
-        # MinCapacity 0 lets it pause when idle (~15s resume on the first
-        # connection), which is why DB_CONNECT_TIMEOUT_MS defaults to 30s.
-        MinCapacity: 0
-        MaxCapacity: 2
-        SecondsUntilAutoPause: 900
-      VpcSecurityGroupIds: [!Ref DBSecurityGroup]
-      DBSubnetGroupName: !Ref DBSubnetGroup
-      BackupRetentionPeriod: 1
-
-  RDSWriterInstance:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      DBInstanceIdentifier: !Sub 'classyear-nest-${Environment}-writer'
-      DBClusterIdentifier: !Ref RDSCluster
-      DBInstanceClass: db.serverless
-      Engine: aurora-postgresql
-      PubliclyAccessible: false
-
-  DBSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: Subnet group for the classyear-nest cluster
-      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-
-  DBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Postgres from the API function only
-      VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          SourceSecurityGroupId: !Ref LambdaSecurityGroup
-
-  LambdaSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: classyear-nest in-VPC Lambda functions
-      VpcId: !Ref VPC
-
-  # VPC endpoints so in-VPC functions reach AWS services without a NAT gateway.
+  # The only security group this stack creates: the SQS endpoint needs one that
+  # admits 443 from the app's functions, and those now sit in the *existing*
+  # app's Lambda group — referenced by id, so nothing about the live stack has
+  # to change.
   VPCEndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: HTTPS from Lambda to the interface endpoints
+      GroupDescription: HTTPS from the classyear-nest functions to the SQS endpoint
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+          SourceSecurityGroupId: !Ref LambdaSecurityGroupId
 
   # **Only SQS is created here.** The VPC already carries S3 (gateway),
   # Secrets Manager and SSM endpoints, created by classyear-serverless:
@@ -516,4 +503,5 @@ Outputs:
   FileBucketName:
     Value: !Ref FileBucket
   DatabaseEndpoint:
-    Value: !GetAtt RDSCluster.Endpoint.Address
+    Description: Shared with classyear-serverless — this stack does not own it
+    Value: !Ref DatabaseHost
