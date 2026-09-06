@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 #
-# The phase 7 gate, in two halves (docs §10):
+# The deployment gate, in three parts:
 #
-#   1. the deployed stack answers, and
-#   2. **both live domains are still served by the old app**.
+#   1. the stack answers,
+#   2. photos resolve and uploads are allowed to preflight (§27), and
+#   3. **all four public names are served by the new distribution** (§29).
 #
-# The second half is the one that matters. Everything through phase 7 is
-# additive, and this is what proves it — if either live domain has started
-# resolving to the new distribution, something has gone wrong and the deploy
-# needs backing out, not debugging.
+# Part 3 was the reverse of this until the apex handover: through phase 7 every
+# change was additive, and the gate asserted that neither live domain had
+# started resolving to the new distribution. Phase 8 inverted it. The check was
+# rewritten rather than deleted, because the weak version — "all four answer
+# 200" — passed happily on the morning after the cutover while asserting the
+# opposite of what had just been done. A gate that cannot fail is not a gate,
+# so this one compares the distribution actually serving each name.
 #
 #   ./scripts/smoke-deployed.sh
 set -euo pipefail
@@ -107,33 +111,49 @@ check "upload preflight from an unlisted origin is refused" 403 \
   "$(preflight https://not-an-origin.example.com)"
 
 echo
-echo "==> Both live domains must still be served by the OLD app ($OLD_STACK)"
+echo "==> All four public names must be served by the NEW app ($STACK)"
 
-OLD_DIST="$(out "$OLD_STACK" FrontendDistributionId)"
 NEW_DIST="$(aws cloudformation describe-stacks --stack-name "$STACK" --region "$REGION" \
   --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionId'].OutputValue" --output text 2>/dev/null)"
-OLD_HOST="$(aws cloudfront get-distribution --id "$OLD_DIST" \
+NEW_HOST="$(aws cloudfront get-distribution --id "$NEW_DIST" \
   --query 'Distribution.DomainName' --output text 2>/dev/null || echo unknown)"
 
-for domain in reunion-connect.org www.reunion-connect.org \
-              unicornconnections.org www.unicornconnections.org; do
-  target="$(dig +short "$domain" CNAME | head -1)"
-  [ -z "$target" ] && target="$(dig +short "$domain" A | head -1)"
-  # An alias record resolves to the distribution's addresses, so compare the
-  # answering CloudFront host rather than the IP.
+for domain in unicornconnections.org www.unicornconnections.org \
+              reunion-connect.org www.reunion-connect.org; do
+  # An alias record resolves to the distribution's addresses, so the IP says
+  # nothing — ask which distribution actually holds the alias.
+  holder="$(aws cloudfront list-distributions --region "$REGION" \
+    --query "DistributionList.Items[?contains(Aliases.Items || \`[]\`, '$domain')].Id | [0]" \
+    --output text 2>/dev/null || echo None)"
   served="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://$domain" || echo 000)"
-  printf '  %-30s HTTP %s\n' "$domain" "$served"
-  [ "$served" = "200" ] || fail=1
+
+  if [ "$served" = "200" ] && [ "$holder" = "$NEW_DIST" ]; then
+    printf '  ✅ %-30s HTTP %s, served by %s\n' "$domain" "$served" "$holder"
+  else
+    printf '  ❌ %-30s HTTP %s, alias held by %s (expected %s)\n' \
+      "$domain" "$served" "$holder" "$NEW_DIST" >&2
+    fail=1
+  fi
 done
 
+# The old distribution must hold nothing. A name left behind there is the one
+# way this could look right per-name and still be half migrated.
+OLD_DIST="$(out "$OLD_STACK" FrontendDistributionId)"
+if [ -n "$OLD_DIST" ] && [ "$OLD_DIST" != "None" ]; then
+  remaining="$(aws cloudfront get-distribution-config --id "$OLD_DIST" \
+    --query 'DistributionConfig.Aliases.Quantity' --output text 2>/dev/null || echo 0)"
+  check "old distribution ($OLD_DIST) holds no aliases" 0 "$remaining"
+else
+  printf '  ✅ %-52s %s\n' "old stack is gone" "no distribution to check"
+fi
+
 echo
-echo "  old distribution: $OLD_DIST ($OLD_HOST)"
-echo "  new distribution: $NEW_DIST  <- must NOT be serving the four names above"
+echo "  new distribution: $NEW_DIST ($NEW_HOST)"
 
 echo
 if [ "$fail" = "0" ]; then
-  echo "✅ Phase 7 gate: new stack answers, both live domains untouched."
+  echo "✅ Gate: the new app answers, serves all four public names, and photos work."
 else
-  echo "❌ Phase 7 gate failed — see above." >&2
+  echo "❌ Gate failed — see above." >&2
   exit 1
 fi

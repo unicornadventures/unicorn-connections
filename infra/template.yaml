@@ -568,7 +568,14 @@ Resources:
   # site (§8.6); it now doubles as the name that keeps working during the
   # cutover, so there is somewhere to check the new app from while the public
   # names are in flight.
-  StagingDNSRecord:
+  #
+  # Deliberately still called FrontendDNSRecords. Renaming it to something
+  # clearer made the changeset read `Add StagingDNSRecord` + `Remove
+  # FrontendDNSRecords` — two resources describing the *same* record. A
+  # RecordSetGroup is created with a CREATE change batch, which fails when the
+  # record already exists, so the add would have failed and rolled back the
+  # whole deploy. Same logical id, same resolved values, no change at all.
+  FrontendDNSRecords:
     Type: AWS::Route53::RecordSetGroup
     Properties:
       HostedZoneId: !Ref SecondaryHostedZoneId
