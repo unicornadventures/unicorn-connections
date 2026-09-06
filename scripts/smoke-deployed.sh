@@ -58,6 +58,54 @@ check "GET /api/users/1 unauthenticated is refused" 401 "$code"
 code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$FRONTEND" || echo 000)"
 check "frontend over HTTPS" 200 "$code"
 
+# ---------------------------------------------------------------------------
+# Photos (docs §27)
+# ---------------------------------------------------------------------------
+#
+# This section exists because the four checks above all passed for a day while
+# every photo on the site 404'd. The stack had its own file bucket, the shared
+# database's keys named objects in the *other* one, and nothing here ever
+# loaded an image. Four green ticks and a feature that had never once worked.
+#
+# No login needed for any of it: the bucket is asked directly.
+
+echo
+echo "==> Photos"
+
+BUCKET="$(aws lambda get-function-configuration \
+  --function-name "classyear-nest-api-${ENVIRONMENT:-nest}" --region "$REGION" \
+  --query 'Environment.Variables.S3_BUCKET_NAME' --output text 2>/dev/null)"
+
+# The keys live in the shared database, so the bucket the API signs against has
+# to be the one holding the objects. An empty bucket here is the §27 bug.
+# --max-keys, not --max-items: the latter is CLI-side pagination and prints the
+# NextToken as a second line, which silently turns $KEY into two lines.
+KEY="$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix photos/ --max-keys 1 \
+  --query 'Contents[0].Key' --output text 2>/dev/null || echo None)"
+
+if [ "$KEY" = "None" ] || [ -z "$KEY" ]; then
+  printf '  ❌ %-52s %s\n' "photo bucket holds objects" "$BUCKET is EMPTY"
+  fail=1
+else
+  printf '  ✅ %-52s %s\n' "photo bucket holds objects" "$BUCKET"
+  url="$(aws s3 presign "s3://$BUCKET/$KEY" --region "$REGION" --expires-in 120)"
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$url" || echo 000)"
+  check "presigned GET of a real photo" 200 "$code"
+fi
+
+# Uploads are presigned PUTs from the browser, so the *bucket* answers the
+# preflight. Display needs none of this — which is why a missing origin looks
+# like "uploads are broken" while pictures still appear. Both directions are
+# checked: the origin must be allowed, and an unlisted one must not be.
+preflight() {
+  curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X OPTIONS \
+    "https://${BUCKET}.s3.amazonaws.com/${KEY}" \
+    -H "Origin: $1" -H 'Access-Control-Request-Method: PUT' || echo 000
+}
+check "upload preflight from $FRONTEND" 200 "$(preflight "$FRONTEND")"
+check "upload preflight from an unlisted origin is refused" 403 \
+  "$(preflight https://not-an-origin.example.com)"
+
 echo
 echo "==> Both live domains must still be served by the OLD app ($OLD_STACK)"
 

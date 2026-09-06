@@ -2201,3 +2201,44 @@ The asymmetry there is a trap worth stating twice: displaying a photo is a plain
 and does. So photos will display correctly the moment this deploys, while
 uploads keep failing — same feature, different mechanism. A working image is not
 evidence that the CORS change has shipped.
+
+### Deployed, and CORS resolved (2026-09-06)
+
+The changeset executed at 01:23:54 UTC; `UPDATE_COMPLETE`, and
+`S3_BUCKET_NAME` on the API function now reads
+`classyear-file-storage-372666940943-dev`. A presigned GET of a real key
+returns `200 image/jpeg, 50468 bytes`.
+
+CORS was applied to the live bucket with `put-bucket-cors` and committed to the
+old repo's template on branch `fix/share-photo-bucket-cors`, so the next deploy
+of `classyear-serverless` preserves it rather than reverting it — the drift the
+write-up warned about, closed by doing both halves rather than choosing one.
+Verified by preflight, in both directions:
+
+```
+https://nest.reunion-connect.org  → 200
+https://www.reunion-connect.org   → 200
+https://evil.example.com          → 403
+```
+
+`https://www.reunion-connect.org` was **not** in the rule and was added. It
+serves the old app today, so uploads from that hostname were failing their
+preflight — a live bug in the Express app, unrelated to this port, found only
+because the rule was being read closely. Nobody had reported it.
+
+### The gate now loads an image
+
+The reason §27 survived a day is that the phase-7 gate checked `/pulse`,
+`/api/schools`, auth and the SPA, and never once fetched a photo. Four green
+ticks over a feature that had never worked. `smoke-deployed.sh` gained a
+**Photos** section: the bucket the API signs against must hold objects, a
+presigned GET of a real key must return 200, and the upload preflight must be
+allowed from the frontend origin *and refused from an unlisted one*. No login
+needed — it asks the bucket directly.
+
+Both new checks failed on their first run, which is the useful part: the failure
+was in the check, not the system. `aws s3api list-objects-v2 --max-items 1` is
+*CLI-side* pagination and prints `None` (the NextToken) as a second line, so the
+key became two lines and the URL was malformed. `--max-keys 1` is the S3-side
+limit and returns one line. A check that had been written and never seen to fail
+would have been worth very little.
