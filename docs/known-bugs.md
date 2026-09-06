@@ -215,7 +215,9 @@ undeletable.
 
 ## 🟠 12. New uploads never overwrite old objects — fixed in the port
 
-**Affects:** 🟠 **live (old app only)**.
+**Affects:** 🟠 **live (old app only)** — but note the two apps now share the
+photo bucket (§27), so the port's delete removes the object for both. The old
+app keeps orphaning its own replacements; the new one no longer does.
 
 Every mint gets a fresh `Date.now()` suffix, so re-uploading a photo orphans the
 previous object. Nothing sweeps them; storage grows with every re-upload.

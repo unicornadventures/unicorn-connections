@@ -2242,3 +2242,50 @@ was in the check, not the system. `aws s3api list-objects-v2 --max-items 1` is
 key became two lines and the URL was malformed. `--max-keys 1` is the S3-side
 limit and returns one line. A check that had been written and never seen to fail
 would have been worth very little.
+
+---
+
+## 28. Scope narrowed to the new app; divergence is now allowed (2026-09-06)
+
+Instruction, 2026-09-06: **focus only on the new app, and diverging is fine.**
+This supersedes the constraint §14 set at the start of phase 1, so it is
+recorded here rather than left implicit in a conversation.
+
+### What §14 said, and why it is now spent
+
+§14 made the deployed Lambda handlers the contract: where the Express router and
+the handlers disagreed, the handlers won, and the port reproduced them exactly —
+error wording, JWT claims, ordering, bugs included. That was the right rule for a
+port whose job was to be indistinguishable from what was already serving traffic.
+It is what let the contract suite assert `expect(nest).toEqual(legacy)` across
+247 tests and mean something.
+
+Two things ended it. The port is deployed and serving live data (§24, §27), and
+the app it was mirroring is being retired. Fidelity to a system on its way out is
+no longer a feature.
+
+### What changes
+
+- **New behaviour no longer needs a divergence justification.** §9's list of
+  deliberate divergences, and the `expectDivergence` assertions pinning them,
+  stay accurate for what they cover — but the bar for adding to them is now
+  "is this better?", not "is this a §9.2 item approved for fixing?".
+- **The contract suite becomes a regression net, not a specification.** Its
+  value now is that it exercises 247 real request/response paths against a real
+  database and object store. A test that fails because the port deliberately
+  improved something should be rewritten to assert the new behaviour, not
+  reverted. It should not be treated as a gate on new work.
+- **Known bugs #3–#8 need no backport decision.** Each is fixed in the port and
+  live only in the old app; the ordering note in `known-bugs.md` framed this as
+  "backport or accept the exposure until it retires", and retiring is now the
+  answer. Phase 8 closes six entries at once.
+
+### What does not change
+
+- **The shared database and bucket are still shared** (§23, §27). Divergence is
+  licensed in behaviour, not in storage: both apps read the same rows and the
+  same objects until the old one is switched off, so a schema change or a
+  destructive photo path still affects both. `RUN_MIGRATIONS=false` stands.
+- **The old repo's CORS rule still matters.** `reunion-connect` PR #9 is not
+  old-app maintenance — it is what stops that stack's next deploy reverting the
+  origin the *new* app uploads from.
