@@ -4,9 +4,15 @@ Everything found during the NestJS port, in one place. The conversion doc
 (`nestjs-conversion-approach.md`) explains each in context; this is the working
 list.
 
-**Read the "Affects" column first.** The two apps now share one database
-(§23), so several of these are live for real users *today* regardless of which
-app they hit.
+**Read the "Affects" column first.** The two apps share one database (§23) and
+one photo bucket (§27), so several of these are live for real users *today*
+regardless of which app they hit.
+
+**Since the apex handover (§29, 2026-09-06)** no public name routes to the old
+app — all four serve the port. That makes #3–#8 unreachable through the front
+door, but *not* closed: the old API Gateway (`imv0ano6ae`) is still deployed and
+still talks to the same database, so anything that can name that URL still
+reaches them. They are ticked off when the old stack is stripped, not before.
 
 | Affects | Meaning |
 |---|---|

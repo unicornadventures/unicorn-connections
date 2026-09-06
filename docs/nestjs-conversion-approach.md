@@ -2289,3 +2289,100 @@ no longer a feature.
 - **The old repo's CORS rule still matters.** `reunion-connect` PR #9 is not
   old-app maintenance — it is what stops that stack's next deploy reverting the
   origin the *new* app uploads from.
+
+---
+
+## 29. Phase 8 — the apex handover (2026-09-06)
+
+All four public names now serve the NestJS app. `unicornconnections.org` is
+canonical.
+
+**Outage: 3m39s**, 03:13:32Z to 03:17:11Z. The estimate given beforehand was
+15–30 minutes, on the assumption that two CloudFront distribution updates would
+take 10–15 minutes each; both settled in about two.
+
+| | |
+|---|---|
+| `unicornconnections.org` | canonical — `FRONTEND_URL`, email links, SES sender |
+| `www.unicornconnections.org`, `reunion-connect.org`, `www.reunion-connect.org` | served identically, reach the API via `CORS_ORIGINS` |
+| `nest.reunion-connect.org` | kept, deliberately |
+| Old distribution `E26CKVNN5XEDQT` | zero aliases |
+
+### One certificate, not two
+
+§8.6 expected "two ACM certificate replacements", a certificate's domain list
+being immutable. One covering all five names does it. The staging name is on it
+on purpose: it let the new certificate be issued, attached and *serving* a day
+before the cutover, so the riskiest dependency was proven rather than assumed
+when the window opened.
+
+### `ClaimPublicNames`
+
+A CloudFront alias belongs to one distribution account-wide, so the names had to
+leave the old distribution before the new one could take them. That gate is a
+parameter: `false` leaves this stack on the staging name, `true` claims all
+four. DNS records are gated with it, because a record pointing at a distribution
+that does not answer for the name yields an SSL error rather than a page.
+`FRONTEND_URL` follows the same condition, so a pre-cutover deploy cannot put a
+host the *old* app is still serving into a password-reset link.
+
+`deploy.sh`'s apex guard was rewritten rather than deleted. Refusing apex names
+by name was right while the old distribution held them; in phase 8 it would have
+blocked the deploy it was written to protect. It now asks CloudFront who holds
+each alias — the actual failure condition, checked against reality.
+
+### The blocker that was nearly missed
+
+`app.enableCors({ origin: <string> })` permits exactly **one** origin, and every
+deployed API call is cross-origin (§24). Three of the four public names would
+have failed every request in the browser, with a completely healthy server and
+nothing in the logs. Found by reading `bootstrap.ts` while planning, not by
+testing — there was no test that could have caught it before the names moved.
+The comment above that rule had also claimed it never fires in production, which
+had been false since phase 7.
+
+### Two things the changeset review caught
+
+Reviewing rather than executing paid for itself twice:
+
+1. **Renaming a DNS resource.** Giving the staging record a clearer logical id
+   produced `Add StagingDNSRecord` + `Remove FrontendDNSRecords` — two resources
+   describing one record. A `RecordSetGroup` is created with a CREATE change
+   batch, which fails when the record already exists, so the add would have
+   failed and rolled back the deploy. Keeping the original logical id makes it a
+   no-op. Renaming a resource is never free in CloudFormation.
+2. **The 51,200-byte limit.** The old stack's template is ~200KB, so
+   `--template-body` rejected it. That attempt changed nothing — verified before
+   retrying, rather than assumed — and the release went via `--template-url`.
+
+### The gate was rewritten, not deleted
+
+`smoke-deployed.sh` asserted the opposite of this until today: through phase 7
+every change was additive, and the check proved neither live domain had moved.
+Its weakness only showed at the handover — it tested for HTTP 200 and nothing
+else, so it passed cheerfully *after* the cutover while its heading claimed the
+four names must NOT be on the new distribution. It now compares which
+distribution holds each alias, and that the old one holds none.
+
+### The old stack is left alone, deliberately
+
+Decision, 2026-09-06. It is dark — no aliases, no DNS — but otherwise intact, so
+**rollback is re-pointing four aliases**. Stripping it ends that, and there is no
+hurry.
+
+It also cannot simply be deleted. It owns the Aurora cluster `classyear-dev`,
+the photo bucket, the Lambda security group these functions join, the security
+group that admits 5432, and three VPC endpoints — every one of them load-bearing
+for the app that just took over. `DeletionPolicy: Snapshot` on the cluster means
+a delete would snapshot and then *remove* it, taking the new app down with the
+old. When the time comes, the shape is: strip the stack to shared infrastructure
+(the 59 Lambdas, API Gateway, distribution, frontend bucket, certificate and DNS
+go), and only then consider `Retain` + import to empty the shell.
+
+### Known bugs #3–#8 are unreachable, not closed
+
+They live in handlers that no public name now routes to. But the old API Gateway
+(`imv0ano6ae`) is still deployed and still talks to the same database, so
+anything that can name that URL can still reach them — #5, the endpoint that
+presigns any key it is given, most of all. They close properly when the stack is
+stripped, and `known-bugs.md` says so rather than ticking them off early.
