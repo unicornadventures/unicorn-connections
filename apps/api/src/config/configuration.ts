@@ -59,6 +59,12 @@ export const envSchema = z
 
     AWS_REGION: z.string().default('us-east-1'),
     FRONTEND_URL: z.string().default('http://localhost:5173'),
+    // Comma-separated, and *additional* to FRONTEND_URL rather than replacing
+    // it: the app is reached at four public names after the apex handover
+    // (§29) but only one of them is canonical, and links in email must use
+    // that one. FRONTEND_URL stays the canonical origin; this is the rest of
+    // the set the browser may call the API from.
+    CORS_ORIGINS: z.string().optional(),
 
     SES_FROM_EMAIL: z.string().optional(),
     // No default. It used to carry a LocalStack URL, but ConfigModule writes
@@ -145,6 +151,8 @@ export interface AppConfig {
   port: number;
   jwtSecret: string;
   frontendUrl: string;
+  /** Every origin the browser may call the API from; `frontendUrl` is always first. */
+  corsOrigins: string[];
   awsRegion: string;
   feedbackEnabled: boolean;
   runMigrations: boolean;
@@ -166,6 +174,17 @@ export const configuration = (): AppConfig => {
     port: env.PORT,
     jwtSecret: env.JWT_SECRET,
     frontendUrl: env.FRONTEND_URL,
+    // Deduplicated with the canonical origin first, so an operator who repeats
+    // FRONTEND_URL in CORS_ORIGINS gets the same result as one who does not.
+    corsOrigins: [
+      ...new Set([
+        env.FRONTEND_URL,
+        ...(env.CORS_ORIGINS ?? '')
+          .split(',')
+          .map((origin) => origin.trim())
+          .filter(Boolean),
+      ]),
+    ],
     awsRegion: env.AWS_REGION,
     // Compared as a string, matching the Express app: only the literal 'false'
     // disables the feedback module; anything else leaves it on.

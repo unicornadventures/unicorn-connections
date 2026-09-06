@@ -123,6 +123,56 @@ describe('configuration factory', () => {
     });
   });
 
+  /**
+   * The app answers to four public names after the apex handover, and a single
+   * CORS origin permits exactly one of them (§29).
+   */
+  describe('corsOrigins', () => {
+    it('is just the canonical origin when CORS_ORIGINS is unset', () => {
+      process.env = {
+        ...original,
+        ...minimal,
+        FRONTEND_URL: 'https://unicornconnections.org',
+      } as NodeJS.ProcessEnv;
+
+      expect(configuration().corsOrigins).toEqual([
+        'https://unicornconnections.org',
+      ]);
+    });
+
+    it('adds CORS_ORIGINS after it, canonical first', () => {
+      process.env = {
+        ...original,
+        ...minimal,
+        FRONTEND_URL: 'https://unicornconnections.org',
+        CORS_ORIGINS:
+          'https://www.unicornconnections.org, https://reunion-connect.org',
+      } as NodeJS.ProcessEnv;
+
+      expect(configuration().corsOrigins).toEqual([
+        'https://unicornconnections.org',
+        'https://www.unicornconnections.org',
+        'https://reunion-connect.org',
+      ]);
+    });
+
+    /** Repeating the canonical origin must not permit it twice. */
+    it('deduplicates, and ignores empty entries', () => {
+      process.env = {
+        ...original,
+        ...minimal,
+        FRONTEND_URL: 'https://unicornconnections.org',
+        CORS_ORIGINS:
+          'https://unicornconnections.org,,  ,https://www.unicornconnections.org',
+      } as NodeJS.ProcessEnv;
+
+      expect(configuration().corsOrigins).toEqual([
+        'https://unicornconnections.org',
+        'https://www.unicornconnections.org',
+      ]);
+    });
+  });
+
   it('treats only the literal string "false" as disabling feedback', () => {
     process.env = {
       ...original,
