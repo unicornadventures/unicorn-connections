@@ -47,7 +47,20 @@ Globals:
         RUN_MIGRATIONS: 'false'
         JWT_SECRET: !Ref JWTSecret
         ADMIN_SEED_PASSWORD_PARAM: !Ref AdminSeedPasswordParam
-        FRONTEND_URL: !Sub 'https://${DomainName}'
+        # The canonical origin — but only once this stack actually serves it.
+        # Before the cutover the app answers at the staging name, and pointing
+        # FRONTEND_URL at a name the old app is still serving would put the
+        # wrong host in password-reset links.
+        FRONTEND_URL: !If
+          - PublicNamesClaimed
+          - !Sub 'https://${DomainName}'
+          - !Sub 'https://${StagingDomainName}'
+        # The other three names. `origin` as a single string permits exactly one
+        # origin, and every deployed API call is cross-origin (§24, §29), so
+        # without this three of the four public names fail every request in the
+        # browser. Listed unconditionally: an origin that is not yet serving is
+        # harmless, and it means the cutover does not depend on this changing.
+        CORS_ORIGINS: !Sub 'https://www.${DomainName},https://${SecondaryDomainName},https://www.${SecondaryDomainName},https://${StagingDomainName}'
         SES_FROM_EMAIL: !Sub 'noreply@${SesSenderDomain}'
         S3_BUCKET_NAME: !Ref FileBucketName
         FEEDBACK_ENABLED: !Ref FeedbackEnabled
@@ -77,25 +90,57 @@ Parameters:
 
   DomainName:
     Type: String
-    Default: nest.reunion-connect.org
+    Default: unicornconnections.org
     Description: >-
-      Where this stack is served. A **subdomain** through phase 7 — a subdomain
-      alias does not conflict with the apex alias on the old distribution, so the
-      new stack gets real HTTPS with zero impact on either live site (§8.6).
-      Phase 8 changes this to the apex.
+      The **canonical** name. One of the four public names has to be canonical
+      because email can only carry one link and SES can only send as one
+      identity, and this is it (§29). It is also the origin FRONTEND_URL names;
+      the other three reach the API through CORS_ORIGINS.
 
   HostedZoneId:
     Type: String
-    Default: Z0466195259YGZ44DUBMY
-    Description: Route53 zone for reunion-connect.org
+    Default: Z04780762C3Q0K0DKRGSP
+    Description: Route53 zone for the canonical domain (unicornconnections.org)
 
-  SesSenderDomain:
+  SecondaryDomainName:
     Type: String
     Default: reunion-connect.org
     Description: >-
-      Verified SES identity to send as. Separate from DomainName because the
-      identity is on the apex while this stack is served from a subdomain — SES
-      has no identity for nest.reunion-connect.org and does not need one (§20).
+      The other public domain. Served identically — same distribution, same
+      certificate, same app — it just is not the one email links to.
+
+  SecondaryHostedZoneId:
+    Type: String
+    Default: Z0466195259YGZ44DUBMY
+    Description: Route53 zone for the secondary domain, and for the staging name
+
+  StagingDomainName:
+    Type: String
+    Default: nest.reunion-connect.org
+    Description: >-
+      Kept deliberately. It is on the certificate and on the distribution
+      throughout, so the new app is reachable at a name of its own while the
+      four public ones are being moved — and afterwards, if something needs
+      checking without going through the public names.
+
+  ClaimPublicNames:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+    Description: >-
+      Whether this distribution claims the four public names. A CloudFront alias
+      belongs to one distribution account-wide, so this must stay 'false' until
+      the old stack has released them, then flip to 'true' — which is the
+      cutover, and the only moment the sites are down (§29).
+
+  SesSenderDomain:
+    Type: String
+    Default: unicornconnections.org
+    Description: >-
+      Verified SES identity to send as. Verified 2026-09-05 (§25), which is what
+      unblocked making it the canonical domain. Kept separate from DomainName
+      because the two answer different questions — where the app is served
+      versus which identity SES will accept.
 
   FeedbackEnabled:
     Type: String
@@ -146,6 +191,10 @@ Parameters:
       it is what lets these functions reach the database WITHOUT modifying the
       live stack — which matters, since phase 8 is meant to be the only phase
       that touches it.
+
+Conditions:
+  # Gates the four public aliases and their DNS records. See the parameter.
+  PublicNamesClaimed: !Equals [!Ref ClaimPublicNames, 'true']
 
 Resources:
 
@@ -426,14 +475,37 @@ Resources:
   FrontendCertificate:
     Type: AWS::CertificateManager::Certificate
     Properties:
-      # Only the subdomain for now. Phase 8 replaces this certificate with one
-      # covering the apex and www — §8.6 notes that means two ACM replacements,
-      # because a certificate's domain list is immutable.
+      # All five names, in one certificate. A certificate's domain list is
+      # immutable, so changing this list *replaces* the certificate: CloudFormation
+      # issues the new one, validates it, repoints the distribution, and only then
+      # deletes the old. §8.6 expected "two ACM replacements"; one covering
+      # everything is simpler and leaves the staging name working throughout.
+      #
+      # The staging name earns its place: keeping nest.reunion-connect.org on the
+      # certificate means the new stack can take the new certificate *before* the
+      # cutover, so the certificate is proven issued and serving before the four
+      # public names are taken off the old distribution.
       DomainName: !Ref DomainName
+      SubjectAlternativeNames:
+        - !Sub 'www.${DomainName}'
+        - !Ref SecondaryDomainName
+        - !Sub 'www.${SecondaryDomainName}'
+        - !Ref StagingDomainName
       ValidationMethod: DNS
+      # Each name is validated in the zone that actually hosts it — the two
+      # apexes live in different hosted zones, and the staging name is a
+      # subdomain of the secondary.
       DomainValidationOptions:
         - DomainName: !Ref DomainName
           HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Sub 'www.${DomainName}'
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Ref SecondaryDomainName
+          HostedZoneId: !Ref SecondaryHostedZoneId
+        - DomainName: !Sub 'www.${SecondaryDomainName}'
+          HostedZoneId: !Ref SecondaryHostedZoneId
+        - DomainName: !Ref StagingDomainName
+          HostedZoneId: !Ref SecondaryHostedZoneId
 
   FrontendOAC:
     Type: AWS::CloudFront::OriginAccessControl
@@ -450,7 +522,18 @@ Resources:
       DistributionConfig:
         Enabled: true
         Comment: !Sub 'ClassYear NestJS frontend (${Environment})'
-        Aliases: [!Ref DomainName]
+        # A CloudFront alias belongs to exactly one distribution account-wide,
+        # so these cannot be claimed until the old stack releases them. That is
+        # what ClaimPublicNames gates: false leaves this distribution on the
+        # staging name only, true takes over the four public names.
+        Aliases: !If
+          - PublicNamesClaimed
+          - - !Ref DomainName
+            - !Sub 'www.${DomainName}'
+            - !Ref SecondaryDomainName
+            - !Sub 'www.${SecondaryDomainName}'
+            - !Ref StagingDomainName
+          - [!Ref StagingDomainName]
         DefaultRootObject: index.html
         HttpVersion: http2
         PriceClass: PriceClass_100
@@ -480,19 +563,58 @@ Resources:
           SslSupportMethod: sni-only
           MinimumProtocolVersion: TLSv1.2_2021
 
-  FrontendDNSRecords:
+  # The staging record, always present. Through phases 7–8 it was the only one,
+  # which is what made this stack deployable with zero impact on either live
+  # site (§8.6); it now doubles as the name that keeps working during the
+  # cutover, so there is somewhere to check the new app from while the public
+  # names are in flight.
+  StagingDNSRecord:
     Type: AWS::Route53::RecordSetGroup
     Properties:
-      HostedZoneId: !Ref HostedZoneId
+      HostedZoneId: !Ref SecondaryHostedZoneId
       RecordSets:
-        # A subdomain alias. It does not touch the apex records that point at
-        # the old distribution, which is what makes this stack deployable with
-        # zero impact on either live site (§8.6).
-        - Name: !Ref DomainName
+        - Name: !Ref StagingDomainName
           Type: A
           AliasTarget:
             DNSName: !GetAtt FrontendDistribution.DomainName
             HostedZoneId: Z2FDTNDATAQYW2  # CloudFront's fixed zone ID
+
+  # The public names, one record group per hosted zone. Created only once the
+  # old distribution has released the aliases — pointing DNS at a distribution
+  # that does not answer for the name yields an SSL error rather than a page.
+  PrimaryDNSRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: PublicNamesClaimed
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref DomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt FrontendDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Sub 'www.${DomainName}'
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt FrontendDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+
+  SecondaryDNSRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: PublicNamesClaimed
+    Properties:
+      HostedZoneId: !Ref SecondaryHostedZoneId
+      RecordSets:
+        - Name: !Ref SecondaryDomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt FrontendDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Sub 'www.${SecondaryDomainName}'
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt FrontendDistribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
 
 Outputs:
   ApiEndpoint:
@@ -502,7 +624,14 @@ Outputs:
     Description: Health check, for the phase 7 smoke test
     Value: !Sub 'https://${ClassYearNestAPI}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/pulse'
   FrontendUrl:
-    Value: !Sub 'https://${DomainName}'
+    Description: >-
+      Where the app is actually reachable — the staging name until the cutover,
+      the canonical domain after it. smoke-deployed.sh reads this, so it checks
+      the name that is really serving rather than one that is merely intended.
+    Value: !If
+      - PublicNamesClaimed
+      - !Sub 'https://${DomainName}'
+      - !Sub 'https://${StagingDomainName}'
   FrontendBucketName:
     Description: Upload the built SPA here
     Value: !Ref FrontendBucket

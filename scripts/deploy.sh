@@ -17,13 +17,20 @@ DRY_RUN=false
 
 # The full parameter set, in one place. Overridable from the environment so a
 # different VPC or domain does not need an edit. These VPC ids are the ones
-# classyear-serverless uses: this stack shares the network (and reuses its
-# S3/SecretsManager/SSM endpoints) but NOT the database — §8.5 gives it its own
-# Aurora cluster so neither app's migrations can break the other.
+# classyear-serverless uses: this stack shares its network, its S3/SecretsManager/
+# SSM endpoints, its Aurora cluster (§23) and its photo bucket (§27).
 ENVIRONMENT="${ENVIRONMENT:-nest}"
-DOMAIN_NAME="${DOMAIN_NAME:-nest.reunion-connect.org}"
-HOSTED_ZONE_ID="${HOSTED_ZONE_ID:-Z0466195259YGZ44DUBMY}"
-SES_SENDER_DOMAIN="${SES_SENDER_DOMAIN:-reunion-connect.org}"
+# The canonical domain (§29). The other three public names are served by the
+# same distribution; only this one goes in FRONTEND_URL and email links.
+DOMAIN_NAME="${DOMAIN_NAME:-unicornconnections.org}"
+HOSTED_ZONE_ID="${HOSTED_ZONE_ID:-Z04780762C3Q0K0DKRGSP}"
+SECONDARY_DOMAIN_NAME="${SECONDARY_DOMAIN_NAME:-reunion-connect.org}"
+SECONDARY_HOSTED_ZONE_ID="${SECONDARY_HOSTED_ZONE_ID:-Z0466195259YGZ44DUBMY}"
+STAGING_DOMAIN_NAME="${STAGING_DOMAIN_NAME:-nest.reunion-connect.org}"
+# 'false' until the old stack has released the four public aliases. Flipping it
+# to 'true' IS the cutover.
+CLAIM_PUBLIC_NAMES="${CLAIM_PUBLIC_NAMES:-false}"
+SES_SENDER_DOMAIN="${SES_SENDER_DOMAIN:-unicornconnections.org}"
 VPC_ID="${VPC_ID:-vpc-021940e171925bd53}"
 SUBNET_1="${SUBNET_1:-subnet-0dfdb663652cba578}"
 SUBNET_2="${SUBNET_2:-subnet-08320caa36be4fa6c}"
@@ -52,24 +59,54 @@ cd "$REPO_ROOT/infra"
 echo "==> Validating"
 sam validate --lint --region us-east-1
 
-# A guard, not a formality: if this stack ever claims an apex alias while the
-# old one still holds it, CloudFront rejects the deploy — an alias is exclusive
-# to one distribution account-wide (§8.6). Better to say so here than to read
-# it out of a CloudFormation rollback.
-case "$DOMAIN_NAME" in
-  reunion-connect.org | www.reunion-connect.org | unicornconnections.org | www.unicornconnections.org)
-    echo "DOMAIN_NAME is an apex/www name still aliased to the old distribution." >&2
-    echo "That handover is phase 8: CloudFront allows one owner per alias" >&2
-    echo "account-wide, so the old stack must release it first (§8.6)." >&2
+# The apex guard, phase 8 edition.
+#
+# It used to refuse any apex DOMAIN_NAME outright, on the grounds that the old
+# distribution held those aliases and CloudFront allows one owner per alias
+# account-wide (§8.6). Phase 8 is when that stops being true, so refusing by
+# *name* would now block the very deploy it was written to protect.
+#
+# So it asks CloudFront instead. An alias still held by another distribution is
+# the actual failure condition, and this reports it before a rollback does.
+if [ "$CLAIM_PUBLIC_NAMES" = "true" ]; then
+  echo "==> Checking the four public aliases are free to claim"
+  OURS="$(aws cloudformation describe-stacks --stack-name classyear-nest --region us-east-1 \
+    --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionId'].OutputValue" \
+    --output text 2>/dev/null || echo none)"
+
+  blocked=0
+  for name in "$DOMAIN_NAME" "www.$DOMAIN_NAME" \
+              "$SECONDARY_DOMAIN_NAME" "www.$SECONDARY_DOMAIN_NAME"; do
+    holder="$(aws cloudfront list-distributions --region us-east-1 \
+      --query "DistributionList.Items[?contains(Aliases.Items || \`[]\`, '$name')].Id | [0]" \
+      --output text 2>/dev/null || echo None)"
+
+    if [ "$holder" = "None" ] || [ -z "$holder" ] || [ "$holder" = "$OURS" ]; then
+      printf '    %-32s free\n' "$name"
+    else
+      printf '    %-32s STILL HELD by %s\n' "$name" "$holder" >&2
+      blocked=1
+    fi
+  done
+
+  if [ "$blocked" = "1" ]; then
+    echo >&2
+    echo "One or more aliases still belong to another distribution. Deploy the" >&2
+    echo "OLD stack with its aliases and DNS records removed first — CloudFront" >&2
+    echo "allows one owner per alias account-wide (§29)." >&2
     exit 1
-    ;;
-esac
+  fi
+fi
 
 OVERRIDES=(
   "JWTSecret=$JWT_SECRET"
   "Environment=$ENVIRONMENT"
   "DomainName=$DOMAIN_NAME"
   "HostedZoneId=$HOSTED_ZONE_ID"
+  "SecondaryDomainName=$SECONDARY_DOMAIN_NAME"
+  "SecondaryHostedZoneId=$SECONDARY_HOSTED_ZONE_ID"
+  "StagingDomainName=$STAGING_DOMAIN_NAME"
+  "ClaimPublicNames=$CLAIM_PUBLIC_NAMES"
   "SesSenderDomain=$SES_SENDER_DOMAIN"
   "VPC=$VPC_ID"
   "PrivateSubnet1=$SUBNET_1"
