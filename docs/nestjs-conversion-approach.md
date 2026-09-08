@@ -2386,3 +2386,66 @@ They live in handlers that no public name now routes to. But the old API Gateway
 anything that can name that URL can still reach them — #5, the endpoint that
 presigns any key it is given, most of all. They close properly when the stack is
 stripped, and `known-bugs.md` says so rather than ticking them off early.
+
+---
+
+## 30. The old stack, stripped (2026-09-08)
+
+`classyear-serverless` is now shared infrastructure and nothing else. **69 resources
+removed, 12 kept.**
+
+| Removed | Kept |
+|---|---|
+| 59 Lambda functions (+59 roles, 69 permissions) | Aurora cluster `classyear-dev` + writer + subnet group |
+| API Gateway (RestApi, Deployment, Stage) | Photo bucket + its public-read policy |
+| CloudFront distribution + origin access control | 3 security groups, 3 VPC endpoints |
+| The four-name ACM certificate | The old frontend bucket |
+| 2 SQS queues + event source mapping, 3 IAM policies | |
+
+### Data safety was made structural, not careful
+
+The instruction was "as long as it won't delete any data in the database". Being careful
+is not a guarantee, so three things were done instead:
+
+1. **A manual snapshot first** — `classyear-dev-pre-strip-20260908-2215`, confirmed
+   `available` before anything was touched. It outlives the stack.
+2. **`DeletionProtection: true`** on the cluster. RDS itself now refuses a delete,
+   whatever CloudFormation is asked to do.
+3. **`DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain`** on the cluster, the
+   writer instance and the photo bucket. The cluster previously carried `Snapshot`, which
+   would have snapshotted *and then removed* it — data preserved, application dead.
+
+The stripped template was generated from the deployed one by a keep-list, with two
+assertions that would abort rather than proceed: that no kept resource still references a
+removed one, and that the three data-bearing resources survived. The changeset was then
+read for what mattered — every `Modify` was `Replacement: False`, scoped to deletion
+policies, and no `Remove` touched RDS or the photo bucket.
+
+### The frontend bucket was kept deliberately
+
+CloudFormation cannot delete a non-empty bucket, so removing it would have failed the
+update partway. It still holds the old SPA build, costs pennies, and can be emptied and
+removed whenever someone wants to.
+
+### What this closes
+
+Known bugs **#3–#8** are now genuinely closed rather than merely unreachable. §29 was
+careful to say the old API Gateway was still deployed against the shared database, so
+anything that could name that URL still reached those handlers. There is no API Gateway
+and there are no handlers.
+
+### What it costs
+
+**Rollback is no longer re-pointing four aliases.** Until today the old app was dark but
+intact; it is now gone, and going back would mean redeploying it from the source repo.
+That was the accepted trade — the new app had served all four names for two days without
+incident.
+
+### An unexplained detail, recorded rather than smoothed over
+
+The photo bucket held 50 objects on 2026-09-05 and 48 today. Two were deleted in between.
+That is consistent with §26's delete-on-replace doing exactly its job — two users
+replacing a then/now photo — and no `Failed to delete replaced S3 object` appears in the
+logs. But it was not proven, and the log filter that would have confirmed the uploads
+returned nothing, which may only mean requests are not logged that way. Recorded because
+an unexplained change in an object count is worth being able to find later.
