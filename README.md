@@ -63,7 +63,8 @@ One SAM stack, `classyear-nest`, defined in `infra/template.yaml`:
   `nest.reunion-connect.org`, which is kept as a name of the app's own for checking a deploy
   without going through the public ones.
 - **`ClaimPublicNames`** gates the four public aliases and their DNS records. A CloudFront
-  alias belongs to one distribution account-wide, so this exists to sequence a handover.
+  alias belongs to one distribution account-wide, so claiming names has to be sequenced
+  rather than assumed.
 
 ```bash
 JWT_SECRET=… ./scripts/deploy.sh --dry-run   # changeset only
@@ -76,17 +77,17 @@ to preflight, and that all four public names are served by this distribution. It
 distribution actually holds each alias rather than settling for an HTTP 200, because a name can
 answer 200 while pointing somewhere else entirely.
 
-### Shared with the legacy app
+### Storage the stack does not own
 
-An older Express/Lambda app is still deployed, dark, pending removal. Until it goes, the two
-share **one Aurora cluster and one S3 photo bucket** — they are one product, and separate
-storage would fork the data. Two consequences:
+The Aurora cluster and the S3 photo bucket are referenced by parameter, not created here, so
+CloudFormation will never replace or delete them. Two things follow:
 
-- This app runs with **`RUN_MIGRATIONS=false`**. Only one app may own the schema, and the older
-  one keeps it until it is retired.
-- The photo bucket's CORS rules live in the legacy app's template, so an origin this app is
-  served from has to be added *there*. Uploads are presigned `PUT`s straight from the browser,
-  so the bucket answers the preflight.
+- The deployed stack runs with **`RUN_MIGRATIONS=false`**, so schema changes are never a side
+  effect of a boot. `apps/api/src/cli/init-schema.ts` applies them deliberately; it is also
+  how you prepare a fresh dev database.
+- **The photo bucket's CORS rules are managed outside this stack.** Uploads are presigned
+  `PUT`s straight from the browser, so the bucket answers the preflight, and an origin this
+  app is served from must be listed there or uploads fail while photos still display.
 
 ## Layout
 
@@ -123,7 +124,7 @@ packages/
 └── shared-types/           @classyear/shared-types — entity types for api + web
 infra/                      SAM template + samconfig for the classyear-nest stack
 scripts/                    build, deploy and verification scripts
-docs/                       known bugs, and the historical record
+docs/                       known bugs, and the decisions on record
 ```
 
 Entity types are defined once, in `@classyear/shared-types`, and consumed by both the API and
@@ -165,24 +166,8 @@ root; target one with `--workspace @classyear/api`.
 - **The Playwright suite mocks every API call** except `e2e/live-api.spec.ts`. It would pass
   against no backend at all, which is why `npm run smoke:web` exists.
 
-## History
+## Decisions on record
 
-This app began as a rewrite of an older Express/Lambda application, and for a while was held
-to matching it response-for-response. That constraint has been lifted — the rewrite is the
-product now, and new behaviour needs no justification against what came before.
-
-[`docs/nestjs-conversion-approach.md`](docs/nestjs-conversion-approach.md) is the record of how
-it got here: the decisions, the deployments, the things that broke and why. It is history, not
-specification. The `§N` references scattered through code comments point at its sections.
-
-Two gates left over from that period still work, and both need a checkout of the legacy app
-(`LEGACY_REPO`, default `~/Code/ClassYear`):
-
-| Command | What it compares |
-|---|---|
-| `npm run contract:verify` | ~250 request/response paths, against a real database and object store |
-| `npm run schema:verify` | Both schemas, dumped with `pg_dump` and diffed |
-
-They are a regression net, not a specification. A test that fails because this app
-deliberately improved something should be rewritten to assert the new behaviour, not reverted.
-They retire with the legacy app.
+`docs/` holds the running record of how this app was built and deployed: the decisions taken,
+what broke, and why things are the way they are. Code comments cite it by section as `§N`.
+It is a record, not a specification — where it and the code disagree, the code is right.
