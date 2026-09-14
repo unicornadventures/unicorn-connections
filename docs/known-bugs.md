@@ -8,17 +8,16 @@ list.
 one photo bucket (§27), so several of these are live for real users *today*
 regardless of which app they hit.
 
-**Since the apex handover (§29, 2026-09-06)** no public name routes to the old
-app — all four serve the port. That makes #3–#8 unreachable through the front
-door, but *not* closed: the old API Gateway (`imv0ano6ae`) is still deployed and
-still talks to the same database, so anything that can name that URL still
-reaches them. They are ticked off when the old stack is stripped, not before.
+**#3–#8 are now closed.** The apex handover (§29) stopped any public name
+routing to the old app, and stripping its stack (§30) removed the handlers
+themselves — there is no API Gateway left to name. Each is pinned by a test in
+this repo, so they stay closed; where that pin was missing it was added rather
+than assumed.
 
 | Affects | Meaning |
 |---|---|
 | 🔴 **live** | Broken in production right now |
 | 🟠 **live, degraded** | Works, but constrained or exposed |
-| 🟠 **live (old app only)** | Fixed in the port; still reachable through the Express/Lambda app until it is retired |
 | 🟡 **ported** | Reproduced deliberately in the new app, awaiting a decision |
 | ⚪️ **fixed** | Closed during the port; listed so it is not rediscovered |
 
@@ -80,21 +79,26 @@ Reversible by deleting the identity and those three records.
 
 ---
 
-## 🔴 3. Email verification is broken in production
+## ⚪️ 3. Email verification was broken in production — fixed
 
-**Affects:** anyone who clicks a verification link.
+**Affected:** anyone who clicked a verification link.
 
-`VerifyEmail.tsx` posts to `/api/auth/verify-email`. That route exists in the
-Express router and has **no deployed Lambda and no entry in `template.yaml`** —
-so in production it hits nothing.
+`VerifyEmail.tsx` posted to `/api/auth/verify-email`. The route existed in the
+old app's router but had **no deployed Lambda and no entry in its template**, so
+in production it hit nothing.
 
 **Evidence:** §14.
-**Status:** the port implements it, so it works on the new app. Still broken on
-the old one.
+**Status:** ⚪️ **fixed.** `AuthController` serves it and `AuthService.verifyEmail`
+implements it. The app that had no route for it no longer exists (§30).
+
+Pinned by `apps/api/src/auth/verify-email.spec.ts` — missing token, unrecognised
+token, success, and that the token is looked up **by hash** rather than by value.
+Until 2026-09-14 nothing in this package tested the route at all; it was covered
+only by its own existence.
 
 ---
 
-## 🔴 4. `setActivePanel` is not defined — admin filters throw
+## ⚪️ 4. `setActivePanel` was not defined — admin filters threw — fixed
 
 **Affects:** any admin using the user manager.
 
@@ -107,41 +111,62 @@ strips types with esbuild and never checks them, so nothing had ever
 type-checked that file.
 
 **Evidence:** §19.
-**Status:** ⚪️ fixed in `apps/web`; still live in the old frontend.
+**Status:** ⚪️ **fixed.** The call is gone from `apps/web`, and the old frontend
+it survived in is no longer served (§30).
+
+It cannot come back the same way: `apps/web` now has a `tsconfig.json` and
+`npm run typecheck` runs over it, so an undefined identifier fails the build
+rather than reaching a user. That absence of type-checking was the root cause,
+not the typo.
 
 ---
 
-## 🟠 5. `GET /api/photos/presigned` presigns any key it is given
+## ⚪️ 5. `GET /api/photos/presigned` presigned any key it was given — fixed
 
-**Affects:** old app only — but that is the same database.
+**Affects:** nothing, now — see Status.
 
 No ownership check at all. Any authenticated user can mint a viewing URL for
 any object in the bucket if they can name it. The millisecond suffix in
 generated keys makes guessing impractical, which is mitigation, not a control.
 
 **Evidence:** §9.2 item 6, §17.
-**Status:** ⚪️ fixed in the port (§21) — the key's owner is resolved from the
-database and `canViewPhotos` applied. **The fix is ineffective while the old app
-is live on the same data**, since an attacker can simply call the old endpoint.
+**Status:** ⚪️ **fixed** (§21) — the key's owner is resolved from the database and
+`canViewPhotos` applied; an unknown key and an unauthorised one are refused
+identically, so the endpoint cannot be used to probe which keys exist.
+
+This entry used to carry a caveat: the fix was ineffective while the old app was
+live on the same data, because an attacker could call its endpoint instead. That
+app is gone (§30), so the caveat is spent.
+
+Pinned by `photos.service.spec.ts` — a key belonging to someone outside the
+caller's classes is refused.
 
 ---
 
-## 🟠 6. `GET /api/users` lists every user to any authenticated caller
+## ⚪️ 6. `GET /api/users` listed every user to any authenticated caller — fixed
 
-**Affects:** old app only — same database.
+**Affects:** nothing, now — see Status.
 
 An unfiltered list of every user in the system, no role check. Nothing in the
 frontend calls it.
 
 **Evidence:** §9.2 item 5.
-**Status:** ⚪️ fixed in the port (§21) — now behind `SuperAdminGuard`. Same
-caveat as #5: reachable through the old app until it retires.
+**Status:** ⚪️ **fixed** (§21) — behind `SuperAdminGuard`. The old app that served
+it to any authenticated caller is gone (§30), so #5's caveat is spent here too.
+
+Pinned by `route-guards.spec.ts`, which asserts the **wiring** rather than the
+guard's logic. `guards.spec.ts` already covered what `SuperAdminGuard` decides,
+but nothing checked it was attached: the decorator could be deleted from
+`UsersController.list` and every test in the package still passed. The only thing
+that caught it was the contract suite, which needs a checkout of an application
+that no longer exists. Verified by removing the guard and watching the new test
+fail.
 
 ---
 
-## 🟠 7. `PUT /api/comments/:commentId` always 500s when sent both fields
+## ⚪️ 7. `PUT /api/comments/:commentId` 500'd when sent both fields — fixed
 
-**Affects:** old app only.
+**Affects:** nothing, now — the old app that had it is gone (§30).
 
 Sending `content` **and** `published` builds
 `SET content = $1, published = false, published = $2`. Postgres rejects the
@@ -155,9 +180,9 @@ which would let an author rewrite an approved comment and re-approve it.
 
 ---
 
-## 🟠 8. Three handlers use `BEGIN`/`COMMIT` that are not transactions
+## ⚪️ 8. Three handlers used `BEGIN`/`COMMIT` that were not transactions — fixed
 
-**Affects:** old app only.
+**Affects:** nothing, now — the old app that had it is gone (§30).
 
 `updateUserProfileHandler`, `moveUserClassHandler` and `createSchoolHandler`
 wrap writes in `BEGIN`/`COMMIT`. None is a transaction: `db.ts`'s `query()`
@@ -219,11 +244,10 @@ undeletable.
 
 ---
 
-## 🟠 12. New uploads never overwrite old objects — fixed in the port
+## 🟡 12. New uploads never overwrite old objects — fixed for then/now
 
-**Affects:** 🟠 **live (old app only)** — but note the two apps now share the
-photo bucket (§27), so the port's delete removes the object for both. The old
-app keeps orphaning its own replacements; the new one no longer does.
+**Affects:** 🟡 the objects already orphaned in the bucket. Nothing creates new
+ones: the only app writing there now deletes what it displaces.
 
 Every mint gets a fresh `Date.now()` suffix, so re-uploading a photo orphans the
 previous object. Nothing sweeps them; storage grows with every re-upload.
@@ -322,10 +346,10 @@ refactor that reverts a fix fails rather than passing quietly.
 1. ~~**#1 and #2**~~ — **done 2026-09-05.** #2 is resolved outright and phase 8
    is unblocked. #1 was overstated and is corrected above; a production-access
    request is submitted and pending.
-2. **#5 and #6** — the two security items. Already fixed in the port, so the
-   real decision is whether to backport to the old app or accept the exposure
-   until it retires. Retiring it sooner closes both.
-3. **#3 and #4** — user-visible breakage, already fixed in the port; they close
-   themselves as traffic moves across.
-4. **#9–#14** — none is urgent. Each needs a small decision more than it needs
-   effort.
+2. ~~**#3–#8**~~ — **done 2026-09-14.** All six were fixed in this app already;
+   what closed them was retiring the app that still served them (§29, §30). Each
+   now has a test in this repo holding it closed.
+3. **#1** is the only one with anything outstanding, and it is a wait: SES
+   production access is submitted and pending.
+4. **#12's remainder** — the orphaned objects already in the bucket want a sweep
+   of unreferenced keys. Not urgent, and its own piece of work.
