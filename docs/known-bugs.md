@@ -23,39 +23,33 @@ than assumed.
 
 ---
 
-## 🟠 1. SES quota is at sandbox limits; production access requested
+## ⚪️ 1. SES quota was at sandbox limits — **resolved**
 
-**Affects:** password-reset and verification email at volume.
+**Affected:** password-reset and verification email at volume.
 
-**Corrected 2026-09-05.** This entry previously read "password reset does not
-work for anyone", on the strength of `ProductionAccessEnabled: false`. A test
-send disproved the strong form: SES **delivered** to
-`crgdncn+sestest@gmail.com`, an address absent from the identity list. Sending
-is not categorically blocked.
+**Resolved 2026-09-14.** Production access was granted. Confirmed against the
+live account, not inferred:
 
-What remains true is that the account reports sandbox-level limits:
+| Signal | Was | Now |
+|---|---|---|
+| `ProductionAccessEnabled` | `false` | **`true`** |
+| `Max24HourSend` | 200/day | **50,000/day** |
+| `MaxSendRate` | 1/second | **14/second** |
+| `ReviewDetails.Status` | `PENDING` | **`GRANTED`** |
 
-| Signal | Value |
-|---|---|
-| `ProductionAccessEnabled` | `false` |
-| `Max24HourSend` | 200/day |
-| `MaxSendRate` | 1/second |
+The 1/second ceiling was the part worth caring about — a class-wide reset event
+would have queued behind it and throttled the SQS worker. At 14/second it is no
+longer a constraint worth planning around.
 
-The two readings were never fully separated: either production access is active
-and the flag is stale, or SES normalised the `+sestest` label against the
-verified `crgdncn@gmail.com` and the account really is sandboxed. The decisive
-test needs a genuine third-party address — mailing a stranger, or deliberately
-hard-bouncing at a domain with no MX, which against a near-zero send history is
-how you *lose* production access. Neither was worth it, and the remedy is the
-same either way.
+**Worth remembering how this entry went wrong.** It originally read "password
+reset does not work for anyone", inferred from `ProductionAccessEnabled: false`
+and never tested. One cheap experiment — a real send — falsified it: SES
+delivered to an address absent from the identity list. The lesson was the
+inference, not the flag: a boolean in an API response was treated as a
+user-visible symptom without anyone checking.
 
-**Action taken:** production access resubmitted via `PutAccountDetails`
-(2026-09-05). `ReviewDetails.Status` moved `GRANTED` → `PENDING`, which also
-clears the stale `GRANTED` that made the account state self-contradictory.
-
-**Still to do:** watch for the outcome. If granted, `ProductionAccessEnabled`
-flips true and the quota rises. 1/second is the constraint worth caring about —
-a class-wide reset event would queue behind it, and the SQS worker would throttle.
+**Action taken:** resubmitted via `PutAccountDetails` on 2026-09-05, granted
+within nine days.
 
 ---
 
@@ -337,19 +331,26 @@ is pinned by an `expectDivergence` assertion in the contract suite — the port'
 new answer *and* the fact that it still differs from the source, so a later
 refactor that reverts a fix fails rather than passing quietly.
 
-#12 was examined and deliberately left: see its entry.
+#12 was examined, deliberately left, then reopened and fixed for then/now
+photos; see its entry.
 
 ---
 
-## Ordering suggestion
+## What is left
 
-1. ~~**#1 and #2**~~ — **done 2026-09-05.** #2 is resolved outright and phase 8
-   is unblocked. #1 was overstated and is corrected above; a production-access
-   request is submitted and pending.
-2. ~~**#3–#8**~~ — **done 2026-09-14.** All six were fixed in this app already;
-   what closed them was retiring the app that still served them (§29, §30). Each
-   now has a test in this repo holding it closed.
-3. **#1** is the only one with anything outstanding, and it is a wait: SES
-   production access is submitted and pending.
-4. **#12's remainder** — the orphaned objects already in the bucket want a sweep
-   of unreferenced keys. Not urgent, and its own piece of work.
+**One entry, #12's remainder:** objects already orphaned in the photo bucket
+from before delete-on-replace existed. Nothing creates new ones. It wants a
+sweep of keys that no `profiles` or `gallery_photos` row references, which is
+its own small piece of work and is not urgent.
+
+Everything else on this list is closed, and each fix has a test in this repo
+holding it closed rather than relying on the contract suite, which needs a
+checkout of an application that no longer exists.
+
+**The gap that is not on this list:** the app has almost no real traffic. Over
+the seven days to 2026-09-14 API Gateway served **66 requests**, three of the
+last four days being zero — the ~864 daily Lambda invocations are the warmer
+hitting `/pulse` directly, not users. So "no errors in seven days" is a much
+weaker statement than it looks, and no real user has been observed logging in
+and uploading a photo end to end. That is the biggest unverified thing about
+this system, and no bug report will surface it.
