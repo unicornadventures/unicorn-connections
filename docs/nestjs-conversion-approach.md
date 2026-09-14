@@ -2498,3 +2498,49 @@ Checked before deleting, because three buckets have confusingly similar names:
 only `classyear-frontend-...-dev` was touched. `classyear-file-storage-...-dev`
 (photos) and `classyear-nest-frontend-...-nest` (the live SPA) were not, and the
 one remaining distribution's origin is the latter.
+
+---
+
+## 32. Orphan sweep, and how to reach the database (2026-09-14)
+
+known-bugs #12 closed out. 11 unreferenced objects removed from the photo
+bucket, 19.6MB; the bucket and the database now agree exactly — 38 objects, 38
+referenced keys, nothing dangling in either direction.
+
+**Every orphan was 48–68 days old**, all predating §26's delete-on-replace.
+Nothing has been orphaned since. That is the fix demonstrating itself on real
+data rather than in a test.
+
+### The database is reachable, and was all along
+
+The cluster is in private subnets and its security group admits 5432 only from
+the Lambda security group, so it looked unreachable from a laptop. It is not:
+**the RDS Data API is enabled**, which is an HTTPS endpoint outside the VPC.
+Ordinary IAM credentials are enough.
+
+```bash
+aws rds-data execute-statement --region us-east-1 \
+  --resource-arn arn:aws:rds:us-east-1:372666940943:cluster:classyear-dev \
+  --secret-arn '<the cluster MasterUserSecret ARN>' \
+  --database class_reunion --sql "select count(*) from users"
+```
+
+The cluster auto-pauses, so the first call after an idle period returns
+`DatabaseResumingException`. Retry after ~20 seconds.
+
+### How the sweep was done
+
+Referenced keys came from one query over `profiles.then_photo_url`,
+`profiles.now_photo_url` and `gallery_photos.s3_key`; the bucket was listed in
+full; the difference was the orphan set. Two guards, both of which reported
+zero: objects modified in the last 24 hours were held back, in case an upload
+was in flight, and the reverse direction was checked too — a *referenced* key
+with no object would mean the database points at something that does not exist.
+
+Two mistakes worth recording, because both were silent:
+
+1. A multi-line `--sql` with `union` returned no rows and exit 0. Collapsed to
+   one line it worked. An empty result and a successful query look identical.
+2. `orphans.txt` was written with `"\\n".join(...)`, so it had no trailing
+   newline, and `while read` skipped the final key. The count said 10 where the
+   list held 11 — caught only because the two numbers were compared.

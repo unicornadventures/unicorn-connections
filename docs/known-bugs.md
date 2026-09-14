@@ -238,36 +238,31 @@ undeletable.
 
 ---
 
-## 🟡 12. New uploads never overwrite old objects — fixed for then/now
+## ⚪️ 12. New uploads never overwrote old objects — fixed, and swept
 
-**Affects:** 🟡 the objects already orphaned in the bucket. Nothing creates new
-ones: the only app writing there now deletes what it displaces.
+**Affects:** nothing.
 
-Every mint gets a fresh `Date.now()` suffix, so re-uploading a photo orphans the
-previous object. Nothing sweeps them; storage grows with every re-upload.
+Every mint gets a fresh `Date.now()` suffix, so re-uploading a photo left the
+previous object behind. Nothing swept them.
 
 **Evidence:** §17, §26.
-**Status:** ⚪️ **fixed for then/now** — `createPhotoUploadUrl` deletes the
-object it displaces. A profile keeps one `then` and one `now`; there is no photo
-history.
+**Status:** ⚪️ **fixed and closed out.**
+
+- **New orphans:** none. `createPhotoUploadUrl` deletes the object it displaces,
+  so a profile keeps one `then` and one `now` and no history (§26).
+- **Old orphans:** swept 2026-09-14. 11 unreferenced objects, 19.6MB, removed
+  via the RDS Data API — the bucket and the database now agree exactly, 38
+  objects and 38 referenced keys, with nothing dangling in either direction.
+
+Every orphan found was 48–68 days old, all of them predating §26. Nothing has
+been orphaned since, which is the fix demonstrating itself on real data rather
+than in a test.
 
 This entry previously read "deliberately not fixed", on the argument that
 deleting at mint time destroys a photo whenever the upload is abandoned. That
-argument was wrong. `setPhotoKey` repoints the column in the same breath as the
-mint, so from that moment the old key is referenced by no row, resolvable by no
-endpoint, and recoverable by nobody — an abandoned upload loses the photo either
-way. All the old behaviour bought was bytes nobody could reach.
-
-The delete happens *after* the column is repointed, so no window names an object
-that is already gone, and a failed delete is logged and swallowed: it leaves
-exactly the orphan the source always left, which is no reason to fail an upload.
-
-**Still open:** gallery photos and any orphan already in the bucket. Gallery
-uploads are additive rather than replacing, so nothing displaces them; the
-pre-existing orphans want a sweep of unreferenced keys, which is its own piece
-of work.
-
----
+was wrong: `setPhotoKey` repoints the column in the same breath, so the old key
+is already unreachable and an abandoned upload loses the photo either way. All
+the old behaviour bought was bytes nobody could reach.
 
 ## ⚪️ 13. Admin event creation 500s when `location` is omitted — fixed
 
@@ -353,13 +348,8 @@ photos; see its entry.
 
 ## What is left
 
-**One entry, #12's remainder:** objects already orphaned in the photo bucket
-from before delete-on-replace existed. Nothing creates new ones. It wants a
-sweep of keys that no `profiles` or `gallery_photos` row references, which is
-its own small piece of work and is not urgent.
-
-Everything else on this list is closed, and each fix has a test in this repo
-holding it closed — see "How these stay fixed" above.
+**Nothing.** Every entry is closed, and each fix has a test in this repo holding
+it closed — see "How these stay fixed" above.
 
 **The gap that is not on this list:** the app has almost no real traffic. Over
 the seven days to 2026-09-14 API Gateway served **66 requests**, three of the
