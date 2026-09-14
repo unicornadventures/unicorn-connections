@@ -2488,15 +2488,13 @@ poor test. It earns its place because the defect *was* the SQL: a column missing
 from an INSERT, and a subquery that has to read the target class's link rather
 than the user's previous one. No layer above can tell the difference.
 
-### Not done: the old frontend bucket
+### The old frontend bucket is gone
 
-`classyear-frontend-372666940943-dev` still holds 10 objects, 5.4MB, of the
-retired SPA. It serves nothing — its bucket policy went with the distribution.
-Emptying it is a recursive delete that needs a human:
+Emptied (10 build artifacts, no user data) and removed from the stack, which now
+holds 11 resources: the Aurora cluster and writer, the photo bucket and its
+policy, the subnet group, three security groups and three VPC endpoints.
 
-```
-aws s3 rm s3://classyear-frontend-372666940943-dev --recursive
-```
-
-Then it can come out of the stack. It costs pennies until then, and
-CloudFormation cannot remove a non-empty bucket, which is why it survived §30.
+Checked before deleting, because three buckets have confusingly similar names:
+only `classyear-frontend-...-dev` was touched. `classyear-file-storage-...-dev`
+(photos) and `classyear-nest-frontend-...-nest` (the live SPA) were not, and the
+one remaining distribution's origin is the latter.
