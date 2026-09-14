@@ -2449,3 +2449,54 @@ replacing a then/now photo — and no `Failed to delete replaced S3 object` appe
 logs. But it was not proven, and the log filter that would have confirmed the uploads
 returned nothing, which may only mean requests are not logged that way. Recorded because
 an unexplained change in an object count is worth being able to find later.
+
+---
+
+## 31. The parity tooling is gone (2026-09-14)
+
+Removed: `tools/contract-tests/`, `tools/legacy-schema/`,
+`scripts/run-contract-tests.sh`, `scripts/verify-schema-parity.sh`, the
+`contract:verify` and `schema:verify` npm scripts, the `tools/*` workspace, and
+the two docker-compose services that existed only to serve them
+(`postgres_test` on :5433, `minio_test` on :9100).
+
+They compared this app against one that no longer exists (§30). Keeping a gate
+that cannot run is worse than not having it: it reads as coverage.
+
+### What it cost, and what was done about it
+
+The contract suite was not only a comparison — it was the **only** thing pinning
+several fixes. `known-bugs.md` said so in as many words: "each is pinned by an
+`expectDivergence` assertion in the contract suite". Deleting it would have
+silently unpinned them, which is exactly the failure §29 recorded for CORS and
+this session found again for #6.
+
+So every fix it covered was checked for native coverage first. Three had it
+already; two did not:
+
+| | Before | Now |
+|---|---|---|
+| #10 `move-class` keeps the school | contract suite only | `move-user-class.repository.spec.ts` |
+| #13 `location` required | contract suite only | `events.service.spec.ts` |
+
+Both were verified by reverting the fix and watching the new test fail, then
+restoring the file byte-identical. A pin never seen to fail is not a pin — the
+same standard §29 applied to the deployment gate.
+
+`move-user-class.repository.spec.ts` asserts **SQL text**, which is normally a
+poor test. It earns its place because the defect *was* the SQL: a column missing
+from an INSERT, and a subquery that has to read the target class's link rather
+than the user's previous one. No layer above can tell the difference.
+
+### Not done: the old frontend bucket
+
+`classyear-frontend-372666940943-dev` still holds 10 objects, 5.4MB, of the
+retired SPA. It serves nothing — its bucket policy went with the distribution.
+Emptying it is a recursive delete that needs a human:
+
+```
+aws s3 rm s3://classyear-frontend-372666940943-dev --recursive
+```
+
+Then it can come out of the stack. It costs pennies until then, and
+CloudFormation cannot remove a non-empty bucket, which is why it survived §30.

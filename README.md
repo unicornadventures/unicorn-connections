@@ -21,10 +21,10 @@ npm run dev                   # http://localhost:5001
 curl http://localhost:5001/pulse
 ```
 
-You need PostgreSQL 14 and, for the photo tests, an S3-compatible store:
+You need PostgreSQL 14, and an S3-compatible store if you are touching photos:
 
 ```bash
-docker compose up -d          # postgres :5432, scratch db :5433, minio :9000, minio_test :9100
+docker compose up -d          # postgres :5432, minio :9000 (console :9001)
 ```
 
 Native installs work too (`brew install postgresql@14 minio`). For a Homebrew Postgres, which

@@ -187,3 +187,74 @@ describe('EventsService authorization', () => {
     });
   });
 });
+
+/**
+ * known-bugs #13. `location` was optional on the wire and NOT NULL in the
+ * schema, so omitting it failed the INSERT and answered 500. It is now rejected
+ * with a 400 before the database is touched.
+ *
+ * Pinned here because the only thing holding it was an `expectDivergence`
+ * assertion in the contract suite, which compared against an application that
+ * no longer exists.
+ */
+describe('EventsService.createEvent — location', () => {
+  const body = {
+    title: 'Reunion Dinner',
+    event_date: '2030-06-15T18:00:00Z',
+    location: 'The Old Hall',
+  };
+
+  it('rejects a missing location with 400 rather than failing the INSERT', async () => {
+    let inserted = false;
+    const service = serviceWith({
+      createEvent: async () => {
+        inserted = true;
+        return row();
+      },
+    });
+
+    await expectRejection(
+      service.createEvent('1', '1', { ...body, location: undefined }, asUser()),
+      400,
+      'location is required.',
+    );
+    expect(inserted).toBe(false);
+  });
+
+  /** Empty and whitespace-only are the same omission as far as NOT NULL is concerned. */
+  it('treats an empty location as missing', async () => {
+    const service = serviceWith({ createEvent: async () => row() });
+
+    await expectRejection(
+      service.createEvent('1', '1', { ...body, location: '' }, asUser()),
+      400,
+      'location is required.',
+    );
+  });
+
+  /**
+   * The pre-existing message must still cover the cases it always covered —
+   * the location check was added as a separate branch so this wording is
+   * untouched.
+   */
+  it('still reports the original message when title is missing', async () => {
+    const service = serviceWith({ createEvent: async () => row() });
+
+    await expectRejection(
+      service.createEvent('1', '1', { ...body, title: undefined }, asUser()),
+      400,
+      'schoolId, classId, title, and event_date are required.',
+    );
+  });
+
+  it('creates the event when location is present', async () => {
+    const service = serviceWith({
+      isClassLinkedToSchool: async () => true,
+      createEvent: async () => row(),
+    });
+
+    await expect(
+      service.createEvent('1', '1', body, asUser()),
+    ).resolves.toBeDefined();
+  });
+});

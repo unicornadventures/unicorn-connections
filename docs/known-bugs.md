@@ -152,8 +152,8 @@ Pinned by `route-guards.spec.ts`, which asserts the **wiring** rather than the
 guard's logic. `guards.spec.ts` already covered what `SuperAdminGuard` decides,
 but nothing checked it was attached: the decorator could be deleted from
 `UsersController.list` and every test in the package still passed. The only thing
-that caught it was the contract suite, which needs a checkout of an application
-that no longer exists. Verified by removing the guard and watching the new test
+that caught it was the contract suite, which compared against an application
+that no longer exists and has since been removed (§31). Verified by removing the guard and watching the new test
 fail.
 
 ---
@@ -324,12 +324,27 @@ caught by its own unit test rather than by reasoning.
 
 ---
 
-## Fixed on `fix/known-bugs`
+## How these stay fixed
 
-#9, #10, #11, #13 (the `location` half) and #14. Each changes behaviour, so each
-is pinned by an `expectDivergence` assertion in the contract suite — the port's
-new answer *and* the fact that it still differs from the source, so a later
-refactor that reverts a fix fails rather than passing quietly.
+#9, #10, #11, #13 and #14 each change behaviour, and each was originally pinned
+by an `expectDivergence` assertion in the contract suite: the new answer, *and*
+the fact that it still differed from the old app, so a refactor that reverted a
+fix failed rather than passing quietly.
+
+That suite has been removed (§31) — it compared against an application that no
+longer exists. Before deleting it, each fix was checked for native coverage, and
+the two that had none got it:
+
+| | Pinned by |
+|---|---|
+| #9 `?requesterId=` off the wire | `class-scope.service.spec.ts` |
+| #10 `move-class` keeps the school | `move-user-class.repository.spec.ts` — **added** |
+| #11 delete sweeps gallery objects | `admin.service.spec.ts` |
+| #13 `location` required | `events.service.spec.ts` — **added** |
+| #14 non-numeric ids | `numeric-id.pipe.spec.ts` |
+
+Both additions were verified by reverting the fix and watching the test fail.
+A pin that has never been seen to fail is not a pin.
 
 #12 was examined, deliberately left, then reopened and fixed for then/now
 photos; see its entry.
@@ -344,8 +359,7 @@ sweep of keys that no `profiles` or `gallery_photos` row references, which is
 its own small piece of work and is not urgent.
 
 Everything else on this list is closed, and each fix has a test in this repo
-holding it closed rather than relying on the contract suite, which needs a
-checkout of an application that no longer exists.
+holding it closed — see "How these stay fixed" above.
 
 **The gap that is not on this list:** the app has almost no real traffic. Over
 the seven days to 2026-09-14 API Gateway served **66 requests**, three of the
