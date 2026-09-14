@@ -16,7 +16,7 @@ import type { AuthenticatedRequest } from './jwt-auth.guard.js';
  * That looks like a copy-paste slip but it is what the deployed handlers
  * return for super-admin-only endpoints, and the Express middleware's more
  * precise 'Super admin access required.' is not what users see in production.
- * Kept for parity; see docs §14.
+ * Kept for parity.
  */
 @Injectable()
 export class SuperAdminGuard implements CanActivate {

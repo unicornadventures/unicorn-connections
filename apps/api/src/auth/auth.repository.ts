@@ -98,7 +98,7 @@ export class AuthRepository {
 
   /**
    * Looked up **by hash**, which is the point. The Express version selected the
-   * most recent unexpired token globally and then compared — see docs §14.
+   * most recent unexpired token globally and then compared.
    */
   async findUserIdByResetTokenHash(
     tokenHash: string,

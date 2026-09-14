@@ -481,7 +481,7 @@ describe('PhotosService.createViewUrl', () => {
   });
 
   /**
-   * The §9.2 item 6 fix. The deployed handler presigned anything it was handed;
+   * The ownership fix. The deployed handler presigned anything it was handed;
    * this refuses a key belonging to someone outside the caller's classes.
    */
   it('refuses a key the caller may not view', async () => {

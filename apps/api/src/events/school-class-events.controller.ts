@@ -14,7 +14,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
  * `SchoolClassesController`'s `@Get(':schoolId/classes')`.
  *
  * Unlike the class directory there is no membership check — any authenticated
- * user can list any class's events. That is deployed behaviour; docs §9.2.
+ * user can list any class's events. That is deployed behaviour;.
  */
 @Controller('schools')
 @UseGuards(JwtAuthGuard)

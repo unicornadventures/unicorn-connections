@@ -22,7 +22,7 @@ const lambdaClient = new LambdaClient({
  * Keeps the API function's execution environment warm on a schedule.
  *
  * Now has **one** target instead of 59 — the single biggest simplification of
- * the port showing up in the operational layer (docs §3.1).
+ * the port showing up in the operational layer.
  *
  * The empty payload matters: the proxy rejects it as a malformed event before
  * anything touches the database, so warming never wakes the deliberately
@@ -82,7 +82,7 @@ async function getEmailService(): Promise<EmailService> {
 /**
  * Consumes the queue `PasswordResetDispatcher` writes to.
  *
- * §8.3 asked whether to keep the queue or send inline under the single-function
+ * It was an open question whether to keep the queue or send inline under the single-function
  * architecture, and recommended keeping it — the queue exists because SES sends
  * were slowing the forgot-password response, and that reason still holds. This
  * is that decision implemented.

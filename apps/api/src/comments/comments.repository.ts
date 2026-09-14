@@ -169,7 +169,7 @@ export class CommentsRepository {
    * both fields were sent — once for the content side effect, once for the
    * explicit value — producing `SET content = $1, published = false,
    * published = $2`, which Postgres rejects as a duplicate assignment, so the
-   * request always 500'd. That is §9.2 item 4, approved for fixing in §21.
+   * request always 500'd. That was fixed deliberately.
    *
    * Where the two disagree, **the content side effect wins**: an edit always
    * unpublishes. Letting an explicit `published: true` through alongside new

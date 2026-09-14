@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import type { Handler } from 'aws-lambda';
-// The **named** export, deliberately. §13 flagged serverless-express under ESM
+// The **named** export, deliberately. serverless-express was flagged under ESM
 // as the one place the port's `"type": "module"` could bite, and this is where
 // it did: the package is CJS with `module.exports = configure`, so at runtime
 // `.default` is `undefined`, while its `.d.ts` declares an ESM-style
@@ -16,27 +16,27 @@ import { configureApp } from './bootstrap.js';
  * serverless-express instead of listening on a port.
  *
  * This is the whole of what replaces 59 individually-defined functions and 68
- * API Gateway route events (docs §3.1). API Gateway routes `{proxy+}/ANY` here
+ * API Gateway route events. API Gateway routes `{proxy+}/ANY` here
  * and Nest's router does the rest, so adding an endpoint no longer means
  * editing YAML in three places.
  *
  * **The cache is the point.** `handler` is module scope, so a warm container
  * reuses the bootstrapped Nest instance — including `DatabaseService`'s pool
  * and the schema initialization that `SchemaService.OnModuleInit` runs. That is
- * exactly what `lambda/init.ts`'s `dbReady` promise did by hand in the source
- * (§8.4), except Nest gives it for free.
+ * exactly what `lambda/init.ts`'s `dbReady` promise did by hand in the
+ * source, except Nest gives it for free.
  *
  * The promise, not the resolved handler, is cached: two requests arriving
  * together on a cold container would otherwise each bootstrap an app, and the
  * loser's would leak a connection pool. The same mistake `DatabaseService`
- * made and §18 fixed.
+ * made and later fixed.
  */
 let bootstrapped: Promise<Handler> | null = null;
 
 async function bootstrap(): Promise<Handler> {
   const app = await NestFactory.create(AppModule, {
     // CloudWatch has its own timestamps and the emoji-prefixed lines are how
-    // this app is eyeballed there (docs §6), so the default logger stays.
+    // this app is eyeballed there, so the default logger stays.
     bufferLogs: false,
   });
 

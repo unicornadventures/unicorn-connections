@@ -5,12 +5,12 @@ import type { AuthUser } from '../auth-user.js';
 /**
  * The per-class authorization checks the source performs *inside* its handlers.
  *
- * Docs §3.2 originally planned these as route-level guards (`UserAdminGuard`,
- * `EventAdminGuard`); §14 deferred them once it was clear the deployed handlers
+ * These were originally planned as route-level guards (`UserAdminGuard`,
+ * `EventAdminGuard`), then deferred once it was clear the deployed handlers
  * run them after argument parsing, against ids that are only known once the row
  * has been fetched — a comment's authorization depends on who wrote it and whose
  * profile it is on, neither of which a guard can see. So they are a service,
- * injected where needed, exactly as §14 predicted.
+ * injected where needed, exactly as predicted.
  *
  * **The two checks disagree about where roles come from, and that is faithful.**
  * `canModerateComments` re-reads `is_admin` / `is_class_admin` from the users
@@ -21,7 +21,7 @@ import type { AuthUser } from '../auth-user.js';
  * real inconsistency in the source. It is reproduced rather than harmonised
  * because harmonising it either adds a database read to event handling or
  * removes one from comment handling, and both are behaviour changes that belong
- * in §9 with a decision attached.
+ * recorded with a decision attached.
  */
 @Injectable()
 export class ClassScopeService {
@@ -124,7 +124,7 @@ export class ClassScopeService {
    * Super admins anywhere; class admins only for someone in one of their
    * classes; nobody else. Roles come from the token.
    *
-   * This is §3.2's `UserAdminGuard`, which §14 deferred and phase 5 built here
+   * This is the planned `UserAdminGuard`, deferred and then built here
    * for the same reason as the others: it needs the target's id, which is a
    * route parameter the handler has already parsed and validated by the time
    * the question is worth asking.

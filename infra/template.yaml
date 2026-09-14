@@ -3,7 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Description: ClassYear (NestJS) - one proxy function + warmer + email worker
 
 # =============================================================================
-# This is the ~51k-line template of the source app, rebuilt (docs §8.5).
+# This is the ~51k-line template of the source app, rebuilt.
 #
 # The old one defines 59 individually-declared Lambda functions wired to 68 API
 # Gateway route events; adding an endpoint means editing YAML in three places.
@@ -12,8 +12,8 @@ Description: ClassYear (NestJS) - one proxy function + warmer + email worker
 # the contract tests already cover.
 #
 # Deliberately NOT here:
-#   * `BinarySettings` / `binaryMimeTypes`. §8.2 expected to need them for
-#     multipart uploads. Phase 4 (§17) established there is no multipart: every
+#   * `BinarySettings` / `binaryMimeTypes`. These were expected to be needed for
+#     multipart uploads. Phase 4 established there is no multipart: every
 #     photo upload is a presigned PUT the browser performs directly against S3,
 #     and the API never receives file bytes.
 #   * Per-route OPTIONS functions. The source declared eight by hand; Nest's
@@ -22,7 +22,7 @@ Description: ClassYear (NestJS) - one proxy function + warmer + email worker
 #
 # Naming is kept distinct from `classyear-serverless` throughout, because both
 # stacks live in one account and several of its names are account-scoped —
-# §8.5's collision table. `Environment` defaults to `nest` for exactly this
+# the collision table. `Environment` defaults to `nest` for exactly this
 # reason: `classyear-file-storage-${AccountId}-dev` already exists.
 # =============================================================================
 
@@ -40,8 +40,8 @@ Globals:
         DB_NAME: !Ref DatabaseName
         DB_USER: classyear_admin
         DATABASE_SECRET_ARN: !Ref DatabaseSecretArn
-        # This app shares the Express app's database and does NOT own the schema
-        # (docs §23). Both running CREATE TABLE IF NOT EXISTS concurrently can
+        # This app shares the Express app's database and does NOT own the
+        # schema. Both running CREATE TABLE IF NOT EXISTS concurrently can
         # race on pg_class, and SchemaService rethrows where the source only
         # logs — so the app that would die is this one.
         RUN_MIGRATIONS: 'false'
@@ -56,7 +56,7 @@ Globals:
           - !Sub 'https://${DomainName}'
           - !Sub 'https://${StagingDomainName}'
         # The other three names. `origin` as a single string permits exactly one
-        # origin, and every deployed API call is cross-origin (§24, §29), so
+        # origin, and every deployed API call is cross-origin, so
         # without this three of the four public names fail every request in the
         # browser. Listed unconditionally: an origin that is not yet serving is
         # harmless, and it means the cutover does not depend on this changing.
@@ -86,7 +86,7 @@ Parameters:
     Default: '/classyear/nest/admin-seed-password'
     Description: >-
       SSM SecureString holding the admin seed password. Seeding is skipped if the
-      parameter does not exist. Never put the password in this template (§8.4).
+      parameter does not exist. Never put the password in this template.
 
   DomainName:
     Type: String
@@ -94,7 +94,7 @@ Parameters:
     Description: >-
       The **canonical** name. One of the four public names has to be canonical
       because email can only carry one link and SES can only send as one
-      identity, and this is it (§29). It is also the origin FRONTEND_URL names;
+      identity, and this is it. It is also the origin FRONTEND_URL names;
       the other three reach the API through CORS_ORIGINS.
 
   HostedZoneId:
@@ -131,13 +131,13 @@ Parameters:
       Whether this distribution claims the four public names. A CloudFront alias
       belongs to one distribution account-wide, so this must stay 'false' until
       the old stack has released them, then flip to 'true' — which is the
-      cutover, and the only moment the sites are down (§29).
+      cutover, and the only moment the sites are down.
 
   SesSenderDomain:
     Type: String
     Default: unicornconnections.org
     Description: >-
-      Verified SES identity to send as. Verified 2026-09-05 (§25), which is what
+      Verified SES identity to send as. Verified 2026-09-05, which is what
       unblocked making it the canonical domain. Kept separate from DomainName
       because the two answer different questions — where the app is served
       versus which identity SES will accept.
@@ -146,7 +146,7 @@ Parameters:
     Type: String
     Default: 'true'
     AllowedValues: ['true', 'false']
-    Description: "'false' makes every /api/feedback route return 404 (§6)"
+    Description: "'false' makes every /api/feedback route return 404"
 
   VPC:
     Type: AWS::EC2::VPC::Id
@@ -273,7 +273,7 @@ Resources:
               Resource: !GetAtt ApiFunction.Arn
 
   # ---------------------------------------------------------------------------
-  # Password-reset email worker (§8.3 decision (a): keep the queue)
+  # Password-reset email worker — the queue is kept deliberately
   # ---------------------------------------------------------------------------
 
   PasswordResetEmailDLQ:
@@ -354,7 +354,7 @@ Resources:
             Resource: '*'
 
   # ---------------------------------------------------------------------------
-  # Storage — SHARED with classyear-serverless, not created here (docs §27)
+  # Storage — SHARED with classyear-serverless, not created here
   # ---------------------------------------------------------------------------
   #
   # There is no FileBucket resource for the same reason there is no RDSCluster:
@@ -363,7 +363,7 @@ Resources:
   # `classyear-nest-files-...` bucket through phases 7–8, and the effect was
   # that every photo 404'd — the keys in the shared `profiles` and
   # `gallery_photos` rows named objects in the *other* bucket, and this app
-  # signed valid URLs against an empty one (§27).
+  # signed valid URLs against an empty one.
   #
   # `FileBucketName` therefore points at the existing bucket. Two consequences
   # worth knowing:
@@ -371,14 +371,14 @@ Resources:
   #   * The bucket's CORS rules belong to the old stack's template, so the
   #     origin this app is served from has to be added *there* — a presigned
   #     PUT is a browser request straight to S3 and the bucket is what answers
-  #     the preflight (§17). Serving a new domain without that change breaks
+  #     the preflight. Serving a new domain without that change breaks
   #     uploads while leaving display working.
   #   * Deleting a photo here deletes it for both apps. That is the point —
   #     they are one product — but it means known-bugs #12's delete-on-replace
   #     now acts on shared objects.
 
   # ---------------------------------------------------------------------------
-  # Database — SHARED with classyear-serverless, not created here (docs §23)
+  # Database — SHARED with classyear-serverless, not created here
   # ---------------------------------------------------------------------------
   #
   # The two apps are one product on two domains. Separate clusters would fork
@@ -427,7 +427,7 @@ Resources:
   # with private DNS for a service already covered in the VPC, and a second S3
   # gateway endpoint on the same route table conflicts on the route it inserts.
   #
-  # §8.5's collision table did not list this; see docs §22.
+  # The collision table did not list this one.
   #
   # SQS is genuinely absent, and this stack needs it: the source ran
   # forgot-password outside the VPC, but here the one proxy function is in-VPC
@@ -478,7 +478,7 @@ Resources:
       # All five names, in one certificate. A certificate's domain list is
       # immutable, so changing this list *replaces* the certificate: CloudFormation
       # issues the new one, validates it, repoints the distribution, and only then
-      # deletes the old. §8.6 expected "two ACM replacements"; one covering
+      # deletes the old. Two ACM replacements were expected; one covering
       # everything is simpler and leaves the staging name working throughout.
       #
       # The staging name earns its place: keeping nest.reunion-connect.org on the
@@ -565,7 +565,7 @@ Resources:
 
   # The staging record, always present. Through phases 7–8 it was the only one,
   # which is what made this stack deployable with zero impact on either live
-  # site (§8.6); it now doubles as the name that keeps working during the
+  # site; it now doubles as the name that keeps working during the
   # cutover, so there is somewhere to check the new app from while the public
   # names are in flight.
   #

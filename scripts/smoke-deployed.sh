@@ -3,8 +3,8 @@
 # The deployment gate, in three parts:
 #
 #   1. the stack answers,
-#   2. photos resolve and uploads are allowed to preflight (§27), and
-#   3. **all four public names are served by the new distribution** (§29).
+#   2. photos resolve and uploads are allowed to preflight, and
+#   3. **all four public names are served by the new distribution**.
 #
 # Part 3 was the reverse of this until the apex handover: through phase 7 every
 # change was additive, and the gate asserted that neither live domain had
@@ -63,7 +63,7 @@ code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$FRONTEND" || echo
 check "frontend over HTTPS" 200 "$code"
 
 # ---------------------------------------------------------------------------
-# Photos (docs §27)
+# Photos
 # ---------------------------------------------------------------------------
 #
 # This section exists because the four checks above all passed for a day while
@@ -81,7 +81,7 @@ BUCKET="$(aws lambda get-function-configuration \
   --query 'Environment.Variables.S3_BUCKET_NAME' --output text 2>/dev/null)"
 
 # The keys live in the shared database, so the bucket the API signs against has
-# to be the one holding the objects. An empty bucket here is the §27 bug.
+# to be the one holding the objects. An empty bucket here is that bug.
 # --max-keys, not --max-items: the latter is CLI-side pagination and prints the
 # NextToken as a second line, which silently turns $KEY into two lines.
 KEY="$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix photos/ --max-keys 1 \

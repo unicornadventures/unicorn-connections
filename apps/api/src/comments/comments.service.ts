@@ -154,8 +154,7 @@ export class CommentsService {
    * Publish/unpublish, or edit.
    *
    * Sending both used to 500 — the deployed handler emits `published` twice and
-   * Postgres rejects the duplicate assignment. Fixed under §9.2 item 4 (see
-   * §21): `published` is now assigned once, and when both are sent the content
+   * Postgres rejects the duplicate assignment. Fixed deliberately: `published` is now assigned once, and when both are sent the content
    * side effect wins, so an edit always returns the comment to moderation. Both
    * authorization checks below still apply, in the same order.
    */

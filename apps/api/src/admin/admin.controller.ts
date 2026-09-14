@@ -28,11 +28,10 @@ import type {
 /**
  * `/api/admin` — user administration.
  *
- * **The guards vary per route, and that is faithful.** Docs §5.5 and §9.2 said
+ * **The guards vary per route, and that is faithful.** An early reading said
  * several of these carried no guard at all; that was true of the *Express*
  * router, and the deployed handlers each open with their own `is_admin` check.
- * Since the deployed handlers are the contract (§14), the port is guarded. See
- * docs §18.
+ * Since the deployed handlers are the contract, the port is guarded.
  *
  * Three levels are in play:
  *   - `SuperAdminGuard` — `is_admin` only. Most of this controller.

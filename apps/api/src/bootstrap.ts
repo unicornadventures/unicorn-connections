@@ -22,17 +22,17 @@ export function configureApp(app: INestApplication): void {
   // it. Under the single proxy function there is nowhere else for it to go:
   // the source's handlers each wrote `Access-Control-Allow-Origin: *` by hand
   // and template.yaml declared OPTIONS routes for a handful of paths, which is
-  // partial coverage this replaces with one uniform rule (docs §6, §9.1).
+  // partial coverage this replaces with one uniform rule.
   //
   // This used to say the rule never fires in production, because the SPA and
   // the API would share a domain behind CloudFront. That is not how the stack
   // was actually deployed: the distribution has only an S3 origin, so the SPA
   // calls the API Gateway URL absolutely and **every** deployed request is
-  // cross-origin (§24). The rule is load-bearing, not a local-development
+  // cross-origin. The rule is load-bearing, not a local-development
   // convenience.
   //
   // Hence a list rather than a single origin. The app answers to four public
-  // names after the apex handover (§29) and `origin` as a string permits
+  // names after the apex handover and `origin` as a string permits
   // exactly one, which would have left three of them failing preflight in a
   // browser with nothing wrong on the server.
   // Resolved leniently: some test slices boot a single module with no

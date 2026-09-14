@@ -107,7 +107,7 @@ describe('JwtAuthGuard', () => {
   });
 
   it('does not consult the database — claims are taken at face value', () => {
-    // Matches the deployed handlers (docs §14): a token claiming is_admin is
+    // Matches the deployed handlers: a token claiming is_admin is
     // trusted for the life of the token. Asserted so the behaviour is a
     // decision on record rather than an oversight.
     const request: Record<string, any> = bearer({

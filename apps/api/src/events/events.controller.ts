@@ -21,11 +21,11 @@ import type { UpdateEventDto } from './dto/event.dto.js';
  *
  * PUT and DELETE are guarded per-event rather than by a route-level guard,
  * because the class an event belongs to is only known after the row is
- * fetched. Docs §14 is where that guard became `ClassScopeService`.
+ * fetched. That guard became `ClassScopeService`.
  *
  * The Express router also had `GET /class/:classId/events` and
  * `GET /class/:classId/days-until-next`. Neither is deployed and neither is
- * called anywhere in the frontend; see docs §9.4.
+ * called anywhere in the frontend.
  */
 @Controller('events')
 @UseGuards(JwtAuthGuard)

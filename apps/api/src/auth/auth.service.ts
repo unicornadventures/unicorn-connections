@@ -32,7 +32,7 @@ export interface AuthenticatedUser {
 /**
  * Auth logic, ported from the deployed handlers (`lambda/auth.ts`,
  * `lambda/forgotPassword.ts`) plus the three Express-only endpoints. See
- * docs §14 for why the deployed versions are the reference.
+ * for why the deployed versions are the reference.
  *
  * Argument checks are written out longhand rather than expressed as DTO
  * decorators. The contract fixes both the exact message strings and the *order*
@@ -119,7 +119,7 @@ export class AuthService {
   /**
    * Registration is switched off. The source's handler returns this on its
    * first line and leaves ~80 lines of unreachable code behind it; the port
-   * keeps the 403 and drops the dead code rather than carrying it (docs §9.3).
+   * keeps the 403 and drops the dead code rather than carrying it.
    */
   register(): never {
     throw new ForbiddenException({
@@ -233,7 +233,7 @@ export class AuthService {
    * Express-only endpoint, with one deliberate fix: the token is looked up by
    * hash. The source selected the most recent unexpired unverified token
    * *globally* and then compared, so two users verifying in the same window
-   * would lock each other out. See docs §14.
+   * would lock each other out.
    */
   async verifyEmail(token?: string) {
     try {

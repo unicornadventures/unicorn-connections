@@ -36,7 +36,7 @@ export class ClassesService {
    * Identity comes from the token, never from a query parameter. The Express
    * routes took `?userId=` and checked *that* id against the class, so anyone
    * could read any directory by passing a member's id; the deployed handlers
-   * use `authUser.id`, which is why they are the reference (docs §14). The
+   * use `authUser.id`, which is why they are the reference. The
    * frontend still sends `?userId=`, harmlessly — it is ignored here.
    *
    * Admins bypass the check entirely, as they do in the source.
@@ -111,7 +111,7 @@ export class ClassesService {
    * Any authenticated user can list any class's members. Unlike the directory
    * below there is no membership check — the deployed handler has none. The
    * payload is limited to names and emails, which is presumably why, though
-   * "presumably" is doing work there; it is flagged in docs §9.2 rather than
+   * "presumably" is doing work there; it is flagged rather than
    * tightened here.
    */
   async getMembers(classId: string) {

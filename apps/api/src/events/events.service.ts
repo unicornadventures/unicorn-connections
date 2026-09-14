@@ -56,7 +56,7 @@ export class EventsService {
 
   /**
    * Any authenticated user can read any event by id — there is no class check
-   * here, unlike the class directory. Flagged in docs §9.2 rather than
+   * here, unlike the class directory. Flagged rather than
    * tightened: it is what is deployed, and event details are not sensitive in
    * the way a member roster is.
    */

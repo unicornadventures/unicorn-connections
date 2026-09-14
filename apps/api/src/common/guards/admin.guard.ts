@@ -19,7 +19,7 @@ import type { AuthenticatedRequest } from './jwt-auth.guard.js';
  *
  * Note this is *not* the Express `requireAdmin` middleware, which re-read the
  * user row and answered 'Missing or invalid authorization token.' / 'User not
- * found.'. See docs §14 for why the deployed version is the reference.
+ * found.'. The deployed version is the reference.
  *
  * Endpoints that additionally scope a class admin to their own class do that
  * check inside the handler, because it depends on arguments the guard has no

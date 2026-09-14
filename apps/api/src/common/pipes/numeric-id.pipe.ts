@@ -11,7 +11,7 @@ import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
  *
  * **Why not `ParseIntPipe`.** Every repository in this app takes ids as strings
  * and interpolates them straight into parameterised SQL — deliberately, because
- * the port kept the source's queries byte-identical (docs §3.3, §15). Coercing
+ * the port kept the source's queries byte-identical. Coercing
  * to `number` here would mean changing every signature it touches, for no gain:
  * Postgres accepts the string form of an integer for an `int` column perfectly
  * well. So this validates and passes the original string through.

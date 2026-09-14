@@ -55,7 +55,7 @@ describe('TokenService', () => {
   it('rejects rather than throws when the stored hash is missing', () => {
     // The Express reset-password route selected only user_id and then read
     // .token_hash off the row, passing undefined in here. It must not throw —
-    // and it must not accidentally match. See docs §14.
+    // and it must not accidentally match.
     expect(tokens.verify(undefined as unknown as string, 'anything')).toBe(
       false,
     );

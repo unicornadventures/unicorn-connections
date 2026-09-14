@@ -39,7 +39,7 @@ const DEFAULT_ROSTER_PAGE_SIZE = 10;
  * `BEGIN`/`COMMIT` in the source, and those are not transactions: `db.ts`'s
  * `query()` calls `pool.query()`, which checks out an arbitrary idle client per
  * statement, so the `BEGIN` and the `UPDATE` can land on different connections.
- * They are genuinely atomic here, via `DatabaseService.withTransaction` (§21).
+ * They are genuinely atomic here, via `DatabaseService.withTransaction`.
  */
 @Injectable()
 export class AdminService {

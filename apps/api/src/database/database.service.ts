@@ -142,7 +142,7 @@ export class DatabaseService implements OnModuleDestroy {
    *
    * Pinning the client is the whole point — `work` receives a `query` bound to
    * that one connection, and using `this.query` inside it would silently escape
-   * the transaction. Approved as a §9.2 fix; see docs §21.
+   * the transaction. A deliberate fix.
    */
   async withTransaction<T>(
     work: (

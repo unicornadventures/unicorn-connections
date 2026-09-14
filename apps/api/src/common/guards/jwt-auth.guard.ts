@@ -15,8 +15,8 @@ export interface AuthenticatedRequest extends Request {
 /**
  * Requires a valid token and attaches the decoded claims to `request.user`.
  *
- * Verification only — no database read, matching the deployed handlers
- * (docs §14). A user deleted or demoted mid-token keeps their claims until it
+ * Verification only — no database read, matching the deployed handlers.
+ * A user deleted or demoted mid-token keeps their claims until it
  * expires; tokens are 24h. That is the source's behaviour and changing it would
  * add a database round-trip to every authenticated request.
  *

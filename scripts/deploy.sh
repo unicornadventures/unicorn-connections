@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Deploys the `classyear-nest` stack (docs §8.5, §8.6).
+# Deploys the `classyear-nest` stack.
 #
 #   JWT_SECRET=... ./scripts/deploy.sh              # deploy
 #   JWT_SECRET=... ./scripts/deploy.sh --dry-run    # changeset only, no execute
@@ -18,9 +18,9 @@ DRY_RUN=false
 # The full parameter set, in one place. Overridable from the environment so a
 # different VPC or domain does not need an edit. These VPC ids are the ones
 # classyear-serverless uses: this stack shares its network, its S3/SecretsManager/
-# SSM endpoints, its Aurora cluster (§23) and its photo bucket (§27).
+# SSM endpoints, its Aurora cluster and its photo bucket.
 ENVIRONMENT="${ENVIRONMENT:-nest}"
-# The canonical domain (§29). The other three public names are served by the
+# The canonical domain. The other three public names are served by the
 # same distribution; only this one goes in FRONTEND_URL and email links.
 DOMAIN_NAME="${DOMAIN_NAME:-unicornconnections.org}"
 HOSTED_ZONE_ID="${HOSTED_ZONE_ID:-Z04780762C3Q0K0DKRGSP}"
@@ -37,9 +37,9 @@ SUBNET_2="${SUBNET_2:-subnet-08320caa36be4fa6c}"
 
 # The EXISTING cluster and the security group that reaches it. This stack shares
 # the database rather than creating one — the two apps are one product on two
-# domains, and separate databases would fork the data (§23).
+# domains, and separate databases would fork the data.
 DATABASE_HOST="${DATABASE_HOST:-classyear-dev.cluster-cezswsoi8m3o.us-east-1.rds.amazonaws.com}"
-# The EXISTING photo bucket, shared for the same reason (§27). A bucket of this
+# The EXISTING photo bucket, shared for the same reason. A bucket of this
 # stack's own holds none of the objects the shared database's keys name.
 FILE_BUCKET_NAME="${FILE_BUCKET_NAME:-classyear-file-storage-372666940943-dev}"
 DATABASE_SECRET_ARN="${DATABASE_SECRET_ARN:-arn:aws:secretsmanager:us-east-1:372666940943:secret:rds!cluster-328925d7-720f-4ad3-9694-8c52236e81f2-yt8gVR}"
@@ -63,7 +63,7 @@ sam validate --lint --region us-east-1
 #
 # It used to refuse any apex DOMAIN_NAME outright, on the grounds that the old
 # distribution held those aliases and CloudFront allows one owner per alias
-# account-wide (§8.6). Phase 8 is when that stops being true, so refusing by
+# account-wide. Phase 8 is when that stops being true, so refusing by
 # *name* would now block the very deploy it was written to protect.
 #
 # So it asks CloudFront instead. An alias still held by another distribution is
@@ -93,7 +93,7 @@ if [ "$CLAIM_PUBLIC_NAMES" = "true" ]; then
     echo >&2
     echo "One or more aliases still belong to another distribution. Deploy the" >&2
     echo "OLD stack with its aliases and DNS records removed first — CloudFront" >&2
-    echo "allows one owner per alias account-wide (§29)." >&2
+    echo "allows one owner per alias account-wide." >&2
     exit 1
   fi
 fi

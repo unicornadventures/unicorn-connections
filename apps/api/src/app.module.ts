@@ -43,7 +43,7 @@ import { AdminModule } from './admin/admin.module.js';
     // mounts at this same `/api/users` prefix: Express matched
     // `GET /api/users/pending` against userRoutes' `GET /:id` because that
     // router was mounted first, and Nest resolves cross-controller collisions
-    // by module import order too (docs §5.3).
+    // by module import order too.
     UsersModule,
     SchoolsModule,
     ClassesModule,
@@ -53,7 +53,7 @@ import { AdminModule } from './admin/admin.module.js';
     EventsModule,
     FeedbackModule,
     // The third module mounting controllers at /api/users, after UsersModule
-    // and CommentsModule. Same §5.3 ordering reason.
+    // and CommentsModule. Same ordering reason.
     PhotosModule,
     AdminModule,
   ],

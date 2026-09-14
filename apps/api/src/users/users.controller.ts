@@ -22,7 +22,7 @@ import type { UpdateProfileDto } from './dto/user.dto.js';
  * `POST /api/users/:userId/assign-class` here. Neither is deployed, neither is
  * called by the frontend, and both create or re-scope accounts with no
  * authentication whatsoever — porting them would open a hole that does not
- * exist in production today. They are recorded in docs §9.4 instead.
+ * exist in production today. They are recorded instead.
  *
  * Every route requires a valid token: `lambda/users.ts` opens each handler with
  * `getAuthUser(event)` and answers 401 'Authentication required.' when it comes
@@ -30,7 +30,7 @@ import type { UpdateProfileDto } from './dto/user.dto.js';
  *
  * Route order matters here. Phase 3 mounts a second, comments-owned controller
  * at this same prefix, and Express resolved `GET /api/users/pending` against
- * `GET /:userId` because userRoutes was mounted first (docs §5.3). Keeping
+ * `GET /:userId` because userRoutes was mounted first. Keeping
  * UsersModule ahead of CommentsModule in AppModule's imports preserves that.
  */
 @Controller('users')
@@ -42,8 +42,8 @@ export class UsersController {
    * Every user in the system, paginated.
    *
    * `SuperAdminGuard` rather than the controller's `JwtAuthGuard`: the deployed
-   * handler serves this to **any** authenticated caller, which is §9.2 item 5,
-   * approved for fixing in §21. Admin-only is the tightest change that keeps
+   * handler serves this to **any** authenticated caller, which was approved
+   * for fixing deliberately. Admin-only is the tightest change that keeps
    * the route — `GET /api/admin/users` is the same listing already behind the
    * same guard, and nothing in the frontend calls this one at all.
    */

@@ -25,7 +25,7 @@ const DEFAULT_PAGE_SIZE = 20;
  * behaviour: `GET /api/users/abc` currently reaches Postgres, fails on
  * `invalid input syntax for type integer`, and answers 500. A pipe would answer
  * 400 with Nest's wording instead. The 500 is not good, but it is the contract,
- * and §9 is where changing it gets argued.
+ * and changing it is a decision, not a port detail.
  */
 @Injectable()
 export class UsersService {
@@ -78,7 +78,7 @@ export class UsersService {
    * deployed behaviour — the Express route had an `?requesterId=` same-class
    * check, but it was opt-in (omitting the parameter skipped it entirely) and
    * has no deployed counterpart, so it protected nothing. Real profile scoping
-   * belongs with the §9.2 requesterId work, not smuggled in here.
+   * belongs with the requesterId work, not smuggled in here.
    */
   async getProfile(userId: string): Promise<UserProfileResponse> {
     try {
@@ -107,7 +107,7 @@ export class UsersService {
   /**
    * Unfiltered, unscoped list of every user in the system, available to any
    * authenticated caller. Flagged rather than fixed: it is deployed as
-   * `GET /api/users`, so narrowing it is a §9.2 decision, not a port decision.
+   * `GET /api/users`, so narrowing it is a product decision, not a port decision.
    * Nothing in the frontend calls it.
    */
   async listUsers(page?: string, pageSize?: string) {
@@ -159,7 +159,7 @@ export class UsersService {
       if (email) {
         const normalized = email.toLowerCase().trim();
         if (await this.repo.isEmailTaken(normalized, userId)) {
-          // 400, not the 409 the Express route used. Deployed wins (§14).
+          // 400, not the 409 the Express route used. Deployed wins.
           throw new BadRequestException({ error: 'Email already in use.' });
         }
         await this.repo.updateEmail(userId, normalized);

@@ -19,7 +19,7 @@ import type { UpdateCommentDto } from './dto/comment.dto.js';
 /**
  * `/api/comments` — the moderation-side half of the comments surface.
  *
- * The source mounts one Express router at two prefixes (docs §2.2, §5.3). This
+ * The source mounts one Express router at two prefixes. This
  * port uses two controllers over one service instead, which is the same routing
  * with the ownership made visible: this one is about acting on a comment you
  * already know the id of, `UserCommentsController` is about a profile's
@@ -36,7 +36,7 @@ export class CommentsController {
 
   /**
    * The frontend sends `?requesterId=` here and it is ignored — standing comes
-   * from the token. Same §9.2 story as the class directory in phase 2.
+   * from the token. Same story as the class directory.
    */
   @Get('pending')
   getAllPending(@CurrentUser() user: AuthUser) {

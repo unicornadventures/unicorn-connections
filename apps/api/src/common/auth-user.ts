@@ -4,7 +4,7 @@ import type { Request } from 'express';
 /**
  * The claims the source signs into a login token — `id`, `email`, `is_admin`,
  * `is_class_admin`. Deliberately no more than that: the deployed handlers trust
- * these claims directly rather than re-reading the user row (see docs §14), so
+ * these claims directly rather than re-reading the user row, so
  * widening the payload would widen what authorization trusts.
  */
 export interface AuthUser {

@@ -7,8 +7,8 @@ import { EmailService } from './email.service.js';
  *
  * The deployed app does this asynchronously: `forgotPassword.ts` enqueues to
  * SQS and `emailWorker.ts` does the SES send. The queue exists because SES
- * sends were slowing the forgot-password response, and that reason still holds
- * (docs §8.3), so the queue is kept.
+ * sends were slowing the forgot-password response, and that reason still
+ * holds, so the queue is kept.
  *
  * Locally there is no queue, so the send happens inline — which in turn hits
  * EmailService's development mode and logs the link to the console. Either way

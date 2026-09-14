@@ -21,17 +21,17 @@ import type { AuthUser } from '../common/auth-user.js';
  *
  * This is the **third** controller mounted at `/api/users`, after
  * `UsersController` and `UserCommentsController` — the source mounted three
- * routers at that prefix too (docs §2.2). Every path here is at least two
+ * routers at that prefix too. Every path here is at least two
  * segments deeper than `UsersController`'s `@Get(':userId')`, so none collide;
- * `PhotosModule` still follows `UsersModule` in AppModule for the §5.3 reason.
+ * `PhotosModule` still follows `UsersModule` in AppModule for the same ordering reason.
  *
  * `POST /:userId/photo/:photoType` does **not** accept a file. It returns a
  * presigned URL the browser then PUTs to directly. The Express router had a
  * multipart handler on this exact path, which is the single most misleading
  * thing in the source: same method, same path, completely different contract.
- * The deployed one wins (§14) — see docs §17.
+ * The deployed one wins.
  *
- * Not ported, neither being deployed nor called by the frontend (docs §9.4):
+ * Not ported, neither being deployed nor called by the frontend:
  * `POST /:userId/photo/upload/:photoType` and `PUT /:userId/photo/:photoType`.
  */
 @Controller('users')

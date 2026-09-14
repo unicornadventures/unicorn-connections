@@ -61,7 +61,7 @@ export const envSchema = z
     FRONTEND_URL: z.string().default('http://localhost:5173'),
     // Comma-separated, and *additional* to FRONTEND_URL rather than replacing
     // it: the app is reached at four public names after the apex handover
-    // (§29) but only one of them is canonical, and links in email must use
+    // but only one of them is canonical, and links in email must use
     // that one. FRONTEND_URL stays the canonical origin; this is the rest of
     // the set the browser may call the API from.
     CORS_ORIGINS: z.string().optional(),

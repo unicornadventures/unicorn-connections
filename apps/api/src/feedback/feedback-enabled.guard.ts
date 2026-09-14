@@ -9,9 +9,9 @@ import { CanActivate, Injectable, NotFoundException } from '@nestjs/common';
  *    does the same (`const feedbackDisabled = () => process.env.FEEDBACK_ENABLED
  *    === 'false'`), which is what lets a test flip the flag without restarting.
  *    Reading `ConfigService` here would cache the value at startup and the
- *    "both states" gate in docs §10 would need two app boots to check.
+ *    "both states" gate would need two app boots to check.
  *
- * 2. **It is a guard, not conditional module loading.** Docs §6 calls this out:
+ * 2. **It is a guard, not conditional module loading.** Worth spelling out:
  *    if the module were only registered when the flag is on, the routes would
  *    404 with Nest's own body rather than `{ error: 'Feedback is not enabled.' }`,
  *    and the flag would stop being observable at runtime.

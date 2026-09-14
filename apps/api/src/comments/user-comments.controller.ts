@@ -16,8 +16,8 @@ import type { CreateCommentDto } from './dto/comment.dto.js';
 /**
  * The comments that hang off a profile, at `/api/users/:userId/comments`.
  *
- * This is the second mount of the source's single `commentRoutes` router
- * (docs §5.3). It shares `CommentsService` with `CommentsController` — one
+ * This is the second mount of the source's single `commentRoutes` router.
+ * It shares `CommentsService` with `CommentsController` — one
  * implementation, two prefixes, which is the shape the source had by accident
  * and this port has on purpose.
  *

@@ -7,7 +7,7 @@ import { SuperAdminGuard } from '../common/guards/super-admin.guard.js';
 import { PhotosModule } from '../photos/photos.module.js';
 
 /**
- * Profiles live here rather than in a separate ProfilesModule (docs §3.2 left
+ * Profiles live here rather than in a separate ProfilesModule ( left
  * that open). There is no endpoint that touches a profile without also touching
  * its user — they are 1:1 and always read through the same join — so splitting
  * them would produce two modules that could never be used apart.

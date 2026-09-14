@@ -11,12 +11,12 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
  * signed-out join page depends on the list being public, so locking it down
  * would break signup; requiring a token for a single school when the whole list
  * is public protects nothing but is what is deployed. Both are reproduced
- * exactly, and the inconsistency is recorded in docs §9.2.
+ * exactly, and the inconsistency is recorded.
  *
  * `POST /api/schools` existed in the Express router — unauthenticated school
  * creation — but was never deployed and is not ported. The deployed way to
  * create a school is `POST /api/admin/schools`, behind an admin check, in
- * phase 5. See docs §9.4.
+ * phase 5.
  *
  * `GET /api/schools/:schoolId/classes` is also under this prefix but is owned
  * by ClassesModule, which is where the source puts it too.

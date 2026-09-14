@@ -10,8 +10,6 @@ the same app.
 NestJS 12 API on Lambda behind API Gateway, a React 18 SPA on CloudFront, Aurora PostgreSQL,
 and photos in S3. Raw SQL throughout — no ORM.
 
-Known issues are tracked in [`docs/known-bugs.md`](docs/known-bugs.md).
-
 ## Quick start
 
 ```bash
@@ -124,7 +122,6 @@ packages/
 └── shared-types/           @classyear/shared-types — entity types for api + web
 infra/                      SAM template + samconfig for the classyear-nest stack
 scripts/                    build, deploy and verification scripts
-docs/                       known bugs, and the decisions on record
 ```
 
 Entity types are defined once, in `@classyear/shared-types`, and consumed by both the API and
@@ -165,9 +162,3 @@ root; target one with `--workspace @classyear/api`.
   rather than letting it reach Postgres.
 - **The Playwright suite mocks every API call** except `e2e/live-api.spec.ts`. It would pass
   against no backend at all, which is why `npm run smoke:web` exists.
-
-## Decisions on record
-
-`docs/` holds the running record of how this app was built and deployed: the decisions taken,
-what broke, and why things are the way they are. Code comments cite it by section as `§N`.
-It is a record, not a specification — where it and the code disagree, the code is right.

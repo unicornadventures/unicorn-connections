@@ -29,7 +29,7 @@ const UPLOAD_CONTENT_TYPE = 'image/jpeg';
  *
  * **The app never handles file bytes.** Uploads are presigned PUTs that the
  * browser performs directly against S3; the API only mints the URL and records
- * the key. See docs §17 for why that makes the multipart question moot.
+ * the key. That is what makes the multipart question moot.
  */
 @Injectable()
 export class S3Service {

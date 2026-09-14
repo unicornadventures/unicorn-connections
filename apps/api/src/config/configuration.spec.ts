@@ -125,7 +125,7 @@ describe('configuration factory', () => {
 
   /**
    * The app answers to four public names after the apex handover, and a single
-   * CORS origin permits exactly one of them (§29).
+   * CORS origin permits exactly one of them.
    */
   describe('corsOrigins', () => {
     it('is just the canonical origin when CORS_ORIGINS is unset', () => {

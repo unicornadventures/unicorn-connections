@@ -11,7 +11,7 @@
  * it had drifted: `CurrentUser` did not declare `user_id`, `first_name` or
  * `last_name` even though `Login.tsx` writes all three and sixty-one call sites
  * read them. Nothing caught it because the frontend had no `tsconfig.json` —
- * Vite strips types without checking them. See docs §19.
+ * Vite strips types without checking them.
  *
  * Response *envelopes* (`{ user, profile }`, `{ schools }`) are not here; they
  * live with the calls in `apiClient.ts`, because they are shaped by the
@@ -118,11 +118,11 @@ export interface RosterEntry {
  * localStorage.
  *
  * `user_id` duplicates `id` because the deployed login response calls it
- * `user_id` (docs §14) and the components read both spellings. `first_name` /
+ * `user_id` and the components read both spellings. `first_name` /
  * `last_name` are flattened out of `profile` for the same reason.
  *
  * `created_at` is optional because the deployed login **never sends it** —
- * §14 records that `Login.tsx` reads a field the Lambda does not return, so it
+ * A review found that `Login.tsx` reads a field the Lambda does not return, so it
  * is `undefined` in production today.
  */
 export interface CurrentUser extends Omit<User, 'created_at'> {

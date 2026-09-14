@@ -15,7 +15,7 @@ import type { AuthUser } from '../common/auth-user.js';
  *
  * The Express router also had `/:id/alumni-count` and `/:id/message-count`.
  * Neither is deployed and neither is referenced anywhere in the frontend, so
- * they are not ported; see docs §9.4.
+ * they are not ported.
  */
 @Controller('classes')
 @UseGuards(JwtAuthGuard)

@@ -180,7 +180,7 @@ export class AdminRepository {
 
   /**
    * Two tables, genuinely atomic. The source's BEGIN/COMMIT around these was a
-   * no-op (see `withTransaction`); this is the §9.2 fix, so a failure updating
+   * no-op (see `withTransaction`); this is the transaction fix, so a failure updating
    * the profile no longer leaves the deceased flag changed on its own.
    */
   async setDeceasedAndNames(
@@ -303,7 +303,7 @@ export class AdminRepository {
    * A class linked to no school still yields NULL, which is the honest answer
    * and matches what `createRosterUser` would store.
    *
-   * Atomic for real (§21): the delete-then-insert pair must not be able to
+   * Atomic for real: the delete-then-insert pair must not be able to
    * strand a user with no class membership at all.
    */
   async moveUserToClass(userId: number, classId: number): Promise<void> {

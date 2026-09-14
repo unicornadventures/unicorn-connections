@@ -31,7 +31,7 @@ const PHOTO_TYPES: PhotoType[] = ['then', 'now'];
  * browser performs directly against S3; this service mints the URL and records
  * the key, and that is the whole of its involvement. The Express router had a
  * multer/multipart variant of the same path, but it was never deployed and the
- * frontend never called it — see docs §17.
+ * frontend never called it.
  *
  * The consequence worth knowing: the database row is written when the URL is
  * *minted*, not when the upload succeeds. A client that asks for a URL and then
@@ -51,8 +51,8 @@ export class PhotosService {
   /**
    * Rejects anything that is not `then` or `now` before the value is used to
    * build a column name. The message is the deployed one — the Express router
-   * said 'photoType must be "then" or "now".', which docs §5.4 recorded, but
-   * that route is not the one in production (§14).
+   * said 'photoType must be "then" or "now".', which recorded, but
+   * that route is not the one in production.
    */
   private assertPhotoType(
     userId: string,
@@ -206,7 +206,7 @@ export class PhotosService {
    *
    * The deployed handler presigns **anything** — any authenticated user could
    * mint a URL for any object in the bucket if they could name it. That is
-   * §9.2 item 6, approved for fixing in §21: the key's owner is now resolved
+   * a deliberate fix: the key's owner is now resolved
    * from the database and `canViewPhotos` applied, which is the same rule the
    * gallery listing uses.
    *

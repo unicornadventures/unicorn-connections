@@ -31,7 +31,7 @@ import type {
  * `/verify-email`) exist only in the Express app and have no deployed route;
  * they are included here, which among other things fixes email verification,
  * since VerifyEmail.tsx calls an endpoint that does not exist in production.
- * See docs §14.
+ *
  *
  * Bodies arrive as loose types and are checked in the service: the contract
  * pins both the message strings and the order they are checked in.

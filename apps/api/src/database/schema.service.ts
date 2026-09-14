@@ -11,12 +11,12 @@ import { DatabaseService } from './database.service.js';
  * carries migration semantics (the class_school backfill has to run before the
  * UNIQUE constraint on classes.year, which has to run before the year seed).
  *
- * One deliberate divergence from the source (see docs §9.1): the original
+ * One deliberate divergence from the source: the original
  * caught its own errors and only logged them, so a failed migration left the
  * app serving requests against a half-built schema. This rethrows.
  *
  * **`RUN_MIGRATIONS=false` skips initialization entirely.** This app shares its
- * database with the Express app (docs §23) and only one of them may own the
+ * database with the Express app and only one of them may own the
  * schema. Both running `CREATE TABLE IF NOT EXISTS` concurrently is not safe:
  * the `IF NOT EXISTS` check and the create are not atomic, so two cold starts
  * racing can raise a duplicate-key error on `pg_class`. The rethrow above then

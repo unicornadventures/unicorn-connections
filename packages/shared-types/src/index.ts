@@ -171,7 +171,7 @@ export interface JwtPayload {
  * objects handed back by node-postgres. By the time the same row reaches a
  * browser it has been through `JSON.stringify`, so those fields are strings.
  * Both facts are true, and neither package should have to restate the field
- * list to express the difference — that restating is exactly the drift §3.4
+ * list to express the difference — that restating is exactly the drift
  * exists to remove.
  *
  * ```ts

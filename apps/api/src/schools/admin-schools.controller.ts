@@ -22,7 +22,7 @@ interface SchoolBodyDto {
 /**
  * `/api/admin/schools` — school CRUD.
  *
- * Owned by SchoolsModule rather than AdminModule, matching §3.2's map
+ * Owned by SchoolsModule rather than AdminModule, matching the module map
  * (`SchoolsModule ← schoolRoutes + adminSchoolRoutes`) and the source, where
  * these are `lambda/schools.ts` handlers alongside the public reads. Three
  * other controllers also mount under `/api/admin/schools` — classes, events,
