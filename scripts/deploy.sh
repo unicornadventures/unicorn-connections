@@ -5,10 +5,15 @@
 #   JWT_SECRET=... ./scripts/deploy.sh              # deploy
 #   JWT_SECRET=... ./scripts/deploy.sh --dry-run    # changeset only, no execute
 #
-# This stack is **additive**. It is served from nest.reunion-connect.org, a
-# subdomain alias that does not touch the apex records pointing at the old
-# distribution — so both live domains keep being served by classyear-serverless
-# throughout. Handing over the apex is phase 8 and is not done here.
+# This stack serves the four public names. That was not always true: through
+# phases 7-8 it was additive, reachable only at nest.reunion-connect.org while
+# classyear-serverless kept serving the apexes, and the handover was a separate
+# step. The handover is done, the old stack is gone, and `CLAIM_PUBLIC_NAMES`
+# now defaults to 'true' because this distribution is what answers for those
+# names — see the parameter below for why the default matters.
+#
+# Only the Lambda and the infrastructure are deployed here. The SPA is
+# `scripts/deploy-web.sh`, and it runs *after* this one.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,9 +32,17 @@ HOSTED_ZONE_ID="${HOSTED_ZONE_ID:-Z04780762C3Q0K0DKRGSP}"
 SECONDARY_DOMAIN_NAME="${SECONDARY_DOMAIN_NAME:-reunion-connect.org}"
 SECONDARY_HOSTED_ZONE_ID="${SECONDARY_HOSTED_ZONE_ID:-Z0466195259YGZ44DUBMY}"
 STAGING_DOMAIN_NAME="${STAGING_DOMAIN_NAME:-nest.reunion-connect.org}"
-# 'false' until the old stack has released the four public aliases. Flipping it
-# to 'true' IS the cutover.
-CLAIM_PUBLIC_NAMES="${CLAIM_PUBLIC_NAMES:-false}"
+# 'true' since the cutover. This distribution holds the four public names and
+# their DNS records, so the default has to assert that rather than ask for it:
+# the parameter is what *creates* those records, and a deploy that defaulted to
+# 'false' would quietly remove them — taking all four public domains down as a
+# side effect of shipping something unrelated. It defaulted to 'false' through
+# phases 7-8, when the old stack still held the aliases and claiming them early
+# would have failed the deploy.
+#
+# `CLAIM_PUBLIC_NAMES=false ./scripts/deploy.sh` is now the deliberate rollback,
+# and it is not a quiet one: it releases the aliases and deletes the records.
+CLAIM_PUBLIC_NAMES="${CLAIM_PUBLIC_NAMES:-true}"
 SES_SENDER_DOMAIN="${SES_SENDER_DOMAIN:-unicornconnections.org}"
 VPC_ID="${VPC_ID:-vpc-021940e171925bd53}"
 SUBNET_1="${SUBNET_1:-subnet-0dfdb663652cba578}"
@@ -59,17 +72,24 @@ cd "$REPO_ROOT/infra"
 echo "==> Validating"
 sam validate --lint --region us-east-1
 
-# The apex guard, phase 8 edition.
+# The apex guard.
 #
 # It used to refuse any apex DOMAIN_NAME outright, on the grounds that the old
 # distribution held those aliases and CloudFront allows one owner per alias
-# account-wide. Phase 8 is when that stops being true, so refusing by
+# account-wide. The cutover is when that stopped being true, so refusing by
 # *name* would now block the very deploy it was written to protect.
 #
-# So it asks CloudFront instead. An alias still held by another distribution is
-# the actual failure condition, and this reports it before a rollback does.
+# So it asks CloudFront instead. An alias held by *another* distribution is the
+# actual failure condition, and this reports it before a rollback does.
+#
+# Since the default became 'true' this runs on every deploy, which is worth
+# having: it is the one check that would notice the names drifting to another
+# distribution. "ours" and "unclaimed" are reported separately, because after
+# the cutover they mean different things — the first is the expected steady
+# state, the second says the records are missing and this deploy will recreate
+# them.
 if [ "$CLAIM_PUBLIC_NAMES" = "true" ]; then
-  echo "==> Checking the four public aliases are free to claim"
+  echo "==> Checking the four public aliases"
   OURS="$(aws cloudformation describe-stacks --stack-name classyear-nest --region us-east-1 \
     --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionId'].OutputValue" \
     --output text 2>/dev/null || echo none)"
@@ -81,10 +101,12 @@ if [ "$CLAIM_PUBLIC_NAMES" = "true" ]; then
       --query "DistributionList.Items[?contains(Aliases.Items || \`[]\`, '$name')].Id | [0]" \
       --output text 2>/dev/null || echo None)"
 
-    if [ "$holder" = "None" ] || [ -z "$holder" ] || [ "$holder" = "$OURS" ]; then
-      printf '    %-32s free\n' "$name"
+    if [ "$holder" = "$OURS" ]; then
+      printf '    %-32s ours\n' "$name"
+    elif [ "$holder" = "None" ] || [ -z "$holder" ]; then
+      printf '    %-32s unclaimed — this deploy will claim it\n' "$name"
     else
-      printf '    %-32s STILL HELD by %s\n' "$name" "$holder" >&2
+      printf '    %-32s HELD by %s\n' "$name" "$holder" >&2
       blocked=1
     fi
   done

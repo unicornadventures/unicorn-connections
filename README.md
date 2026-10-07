@@ -60,15 +60,26 @@ One SAM stack, `classyear-nest`, defined in `infra/template.yaml`:
 - **A CloudFront distribution** serving the SPA from S3, holding all four public names plus
   `nest.reunion-connect.org`, which is kept as a name of the app's own for checking a deploy
   without going through the public ones.
-- **`ClaimPublicNames`** gates the four public aliases and their DNS records. A CloudFront
-  alias belongs to one distribution account-wide, so claiming names has to be sequenced
-  rather than assumed.
+- **`ClaimPublicNames`** gates the four public aliases and their DNS records. It defaults to
+  `true`: the cutover is done, this distribution serves those names, and the parameter is what
+  creates the records — so a deploy defaulting to `false` would remove them and take all four
+  domains down. Setting `false` is a deliberate rollback, not a safe default.
+
+A deploy is **two commands**, in this order. `deploy.sh` ships the Lambda and the
+infrastructure; `deploy-web.sh` builds the SPA and publishes it. API first: the API accepting
+something the UI does not yet offer is invisible, while a UI offering what the API still
+rejects is a user-visible error.
 
 ```bash
 JWT_SECRET=… ./scripts/deploy.sh --dry-run   # changeset only
-JWT_SECRET=… ./scripts/deploy.sh             # executes
+JWT_SECRET=… ./scripts/deploy.sh             # executes — Lambda + infrastructure
+./scripts/deploy-web.sh                      # builds and publishes the SPA
 ./scripts/smoke-deployed.sh                  # verify
 ```
+
+`JWT_SECRET` is `NoEcho` in the template and is not recoverable from the deployed stack, so it
+has to come from wherever it is kept. A *different* value deploys cleanly and invalidates every
+session, signing out every logged-in user.
 
 `smoke-deployed.sh` checks that the stack answers, that photos resolve and uploads are allowed
 to preflight, and that all four public names are served by this distribution. It compares which
