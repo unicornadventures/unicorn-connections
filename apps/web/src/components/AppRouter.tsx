@@ -22,6 +22,7 @@ import UserCommentsPage from './UserCommentsPage';
 import EventsPage from './EventsPage';
 import EventsManager from './EventsManager';
 import SlideshowPage from './SlideshowPage';
+import ClassPhotosPage from './ClassPhotosPage';
 import JoinPage from './JoinPage';
 import HelpPage from './HelpPage';
 import FeedbackPage from './FeedbackPage';
@@ -64,6 +65,7 @@ const AppRouter: React.FC = () => {
           <Route path="/directory" element={!isSuperAdmin ? <DirectoryPage /> : <Navigate to="/" replace />} />
           <Route path="/events" element={!isSuperAdmin ? <EventsPage /> : <Navigate to="/" replace />} />
           <Route path="/slideshow" element={!isSuperAdmin ? <SlideshowPage /> : <Navigate to="/" replace />} />
+          <Route path="/class-photos" element={!isSuperAdmin ? <ClassPhotosPage /> : <Navigate to="/" replace />} />
           <Route path="/user/:userId" element={!isSuperAdmin ? <UserCommentsPage /> : <Navigate to="/" replace />} />
           <Route path="/admin/user/:userId" element={isSuperAdmin ? <AdminUserProfile /> : <Navigate to="/" replace />} />
           <Route path="/admin/comments" element={isSuperAdmin || isClassAdmin ? <AdminCommentsPage /> : <Navigate to="/" replace />} />

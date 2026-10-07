@@ -376,3 +376,172 @@ describe('ClassesService.getMembers', () => {
     expect(checked).toBe(false);
   });
 });
+
+describe('ClassesService.getGalleryPhotos', () => {
+  /** Records the arguments the service passes down to the repository. */
+  function capturing(over: Partial<ClassesRepository> = {}) {
+    const calls: {
+      direction?: 'ASC' | 'DESC';
+      pageSize?: number;
+      offset?: number;
+    } = {};
+    const service = serviceWith({
+      isClassMember: async () => true,
+      countClassGalleryPhotos: async () => 0,
+      listClassGalleryPhotos: async (_classId, direction, pageSize, offset) => {
+        Object.assign(calls, { direction, pageSize, offset });
+        return [];
+      },
+      ...over,
+    });
+    return { service, calls };
+  }
+
+  const row = (id: number) => ({
+    id,
+    s3_key: `g${id}.jpg`,
+    caption: null,
+    created_at: new Date('2024-01-01T00:00:00Z'),
+    user_id: 10,
+    first_name: 'Ada',
+    last_name: 'Lovelace',
+  });
+
+  it('defaults to newest first, page 1, and the default page size', async () => {
+    const { service, calls } = capturing();
+
+    const result = await service.getGalleryPhotos('1', asUser());
+
+    expect(calls).toEqual({ direction: 'DESC', pageSize: 24, offset: 0 });
+    expect(result).toMatchObject({ page: 1, pageSize: 24, order: 'newest' });
+  });
+
+  it('maps order=oldest to ASC', async () => {
+    const { service, calls } = capturing();
+
+    const result = await service.getGalleryPhotos('1', asUser(), {
+      order: 'oldest',
+    });
+
+    expect(calls.direction).toBe('ASC');
+    expect(result!.order).toBe('oldest');
+  });
+
+  it('turns page and pageSize into an offset', async () => {
+    const { service, calls } = capturing();
+
+    await service.getGalleryPhotos('1', asUser(), { page: '3', pageSize: '10' });
+
+    expect(calls).toMatchObject({ pageSize: 10, offset: 20 });
+  });
+
+  /**
+   * Each of these reached SQL as a negative OFFSET before the clamp, which
+   * Postgres rejects — a 500 for what is really a malformed query string.
+   */
+  it.each([
+    ['abc', 'not a number'],
+    ['-3', 'negative'],
+    ['0', 'zero'],
+    ['', 'empty'],
+  ])('falls back to page 1 when page is %s (%s)', async (page) => {
+    const { service, calls } = capturing();
+
+    await service.getGalleryPhotos('1', asUser(), { page });
+
+    expect(calls.offset).toBe(0);
+  });
+
+  it('caps pageSize so one request cannot presign the whole class', async () => {
+    const { service, calls } = capturing();
+
+    await service.getGalleryPhotos('1', asUser(), { pageSize: '100000' });
+
+    expect(calls.pageSize).toBe(100);
+  });
+
+  it('ignores an unrecognised order rather than failing the page load', async () => {
+    const { service, calls } = capturing();
+
+    const result = await service.getGalleryPhotos('1', asUser(), {
+      order: 'sideways',
+    });
+
+    expect(calls.direction).toBe('DESC');
+    expect(result!.order).toBe('newest');
+  });
+
+  it('resolves each key and carries the uploader through', async () => {
+    const { service } = capturing({
+      countClassGalleryPhotos: async () => 1,
+      listClassGalleryPhotos: async () => [{ ...row(7), caption: 'Prom' }],
+    });
+
+    const { photos, total } = (await service.getGalleryPhotos('1', asUser()))!;
+
+    expect(total).toBe(1);
+    expect(photos[0]).toEqual({
+      id: 7,
+      url: 'signed:g7.jpg',
+      caption: 'Prom',
+      created_at: new Date('2024-01-01T00:00:00Z'),
+      userId: 10,
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+    });
+  });
+
+  /**
+   * The opposite of getPhotos, which drops unresolvable keys because the
+   * slideshow cannot render a hole. Here a dropped row would make the page
+   * shorter than pageSize and disagree with `total`, so the null is kept and
+   * the client renders a placeholder.
+   */
+  it('keeps a photo whose object is missing rather than dropping it', async () => {
+    const dropping = {
+      resolve: async (key: string) => (key === 'g2.jpg' ? null : `signed:${key}`),
+    } as unknown as S3Service;
+
+    const service = new ClassesService(
+      {
+        isClassMember: async () => true,
+        countClassGalleryPhotos: async () => 2,
+        listClassGalleryPhotos: async () => [row(1), row(2)],
+      } as unknown as ClassesRepository,
+      dropping,
+    );
+
+    const { photos } = (await service.getGalleryPhotos('1', asUser()))!;
+
+    expect(photos).toHaveLength(2);
+    expect(photos[1].url).toBeNull();
+  });
+
+  it('refuses a caller who is not in the class', async () => {
+    const service = serviceWith({
+      isClassMember: async () => false,
+      countClassGalleryPhotos: async () => 0,
+      listClassGalleryPhotos: async () => [],
+    });
+
+    await expectRejection(
+      service.getGalleryPhotos('13', asUser()),
+      403,
+      'Access denied. You are not in this class.',
+    );
+  });
+
+  it('lets an admin through without a membership check', async () => {
+    let checked = false;
+    const { service } = capturing({
+      isClassMember: async () => {
+        checked = true;
+        return false;
+      },
+    });
+
+    await service.getGalleryPhotos('13', asUser({ is_admin: true }));
+
+    expect(checked).toBe(false);
+  });
+});

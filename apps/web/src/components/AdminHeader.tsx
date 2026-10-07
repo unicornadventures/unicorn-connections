@@ -37,6 +37,7 @@ const AdminHeader: React.FC = () => {
       { to: '/', label: 'Home' },
       { to: '/directory', label: 'Directory' },
       { to: '/slideshow', label: 'Slideshow' },
+      { to: '/class-photos', label: 'Class Photos' },
       { to: '/comments', label: 'My Comments' },
     ] : []),
     ...(isSuperAdmin || isClassAdmin ? [

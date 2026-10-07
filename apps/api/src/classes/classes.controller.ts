@@ -1,4 +1,4 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ClassesService } from './classes.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { NumericIdPipe } from '../common/pipes/numeric-id.pipe.js';
@@ -43,6 +43,21 @@ export class ClassesController {
   @Get(':classId/photos')
   getPhotos(@Param('classId', NumericIdPipe) classId: string, @CurrentUser() user: AuthUser) {
     return this.classes.getPhotos(classId, user);
+  }
+
+  /**
+   * The class photo page: gallery uploads only, paginated, oldest or newest
+   * first. `/photos` above stays as it is — it feeds the slideshow, which
+   * shuffles the whole set and needs then/now portraits that this one cannot
+   * order by date. See `getGalleryPhotos`.
+   */
+  @Get(':classId/gallery-photos')
+  getGalleryPhotos(
+    @Param('classId', NumericIdPipe) classId: string,
+    @CurrentUser() user: AuthUser,
+    @Query() query: Record<string, string>,
+  ) {
+    return this.classes.getGalleryPhotos(classId, user, query);
   }
 
   @Get(':classId')

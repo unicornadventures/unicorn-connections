@@ -22,6 +22,21 @@ export interface ClassMemberRow {
   last_name: string | null;
 }
 
+/**
+ * One gallery upload as the class photo page needs it: the photo, its caption,
+ * and who uploaded it. `s3_key` is resolved to a presigned URL by the service —
+ * only for the rows on the requested page, which is the point of paginating.
+ */
+export interface ClassGalleryPhotoRow {
+  id: number;
+  s3_key: string;
+  caption: string | null;
+  created_at: Date;
+  user_id: number;
+  first_name: string | null;
+  last_name: string | null;
+}
+
 /** The richer row the directory page renders; photo fields are S3 keys. */
 export interface DirectoryEntryRow {
   id: number;
@@ -277,6 +292,51 @@ export class ClassesRepository {
        JOIN class_user cu ON gp.user_id = cu.user_id
        WHERE cu.class_id = $1`,
       [classId],
+    );
+    return result.rows;
+  }
+
+  async countClassGalleryPhotos(classId: string): Promise<number> {
+    const result = await this.db.query<{ count: string }>(
+      `SELECT COUNT(*) FROM gallery_photos gp
+       JOIN class_user cu ON gp.user_id = cu.user_id
+       WHERE cu.class_id = $1`,
+      [classId],
+    );
+    return parseInt(result.rows[0].count, 10);
+  }
+
+  /**
+   * One page of the class's gallery uploads, oldest or newest first.
+   *
+   * `created_at` alone is not a stable sort. It is a TIMESTAMP with no
+   * uniqueness, and a member uploading several photos in one sitting can land
+   * two in the same second; Postgres is then free to order those two
+   * differently between the queries that serve page 1 and page 2, which shows
+   * one photo twice and hides another entirely. `id` breaks the tie, and is
+   * monotonic in insert order so it agrees with `created_at` rather than
+   * fighting it.
+   *
+   * `direction` is interpolated, not bound: it is part of ORDER BY, where a
+   * placeholder is not allowed. The service maps it from a closed set before
+   * it gets here, so the only two strings that can arrive are the two below.
+   */
+  async listClassGalleryPhotos(
+    classId: string,
+    direction: 'ASC' | 'DESC',
+    pageSize: number,
+    offset: number,
+  ): Promise<ClassGalleryPhotoRow[]> {
+    const result = await this.db.query<ClassGalleryPhotoRow>(
+      `SELECT gp.id, gp.s3_key, gp.caption, gp.created_at,
+              gp.user_id, p.first_name, p.last_name
+       FROM gallery_photos gp
+       JOIN class_user cu ON gp.user_id = cu.user_id
+       LEFT JOIN profiles p ON gp.user_id = p.user_id
+       WHERE cu.class_id = $1
+       ORDER BY gp.created_at ${direction}, gp.id ${direction}
+       LIMIT $2 OFFSET $3`,
+      [classId, pageSize, offset],
     );
     return result.rows;
   }
