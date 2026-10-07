@@ -28,7 +28,7 @@ import type {
 } from '@classyear/shared-types';
 
 export type { Serialized } from '@classyear/shared-types';
-export { AVATAR_COLORS, isValidAvatarColor } from '@classyear/shared-types';
+export { AVATAR_COLORS, GALLERY_LIMIT, isValidAvatarColor } from '@classyear/shared-types';
 
 /**
  * `password` never leaves the API, so it is dropped rather than declared and

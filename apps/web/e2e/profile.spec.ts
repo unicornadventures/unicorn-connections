@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { GALLERY_LIMIT } from '@classyear/shared-types';
 import { loginAs } from './helpers/auth';
 import { profileLink } from './helpers/nav';
 
@@ -148,8 +149,10 @@ test.describe('Own Profile', () => {
   });
 
   test('should show empty gallery state for own profile', async ({ page }) => {
-    await expect(page.getByText('Gallery (0/9)')).toBeVisible();
-    await expect(page.getByText('No gallery photos yet. Add up to 9 photos.')).toBeVisible();
+    await expect(page.getByText(`Gallery (0/${GALLERY_LIMIT})`)).toBeVisible();
+    await expect(
+      page.getByText(`No gallery photos yet. Add up to ${GALLERY_LIMIT} photos.`),
+    ).toBeVisible();
   });
 
   test('should show placeholders for then/now photos with an upload prompt', async ({ page }) => {

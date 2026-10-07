@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { SITE_BRAND } from '../branding';
+import { GALLERY_LIMIT } from '../types';
 
 const section = (title: string, items: string[]) => (
   <div className="mb-8">
@@ -29,7 +30,7 @@ const HelpPage: React.FC = () => (
         'Add your bio to share what you\'ve been up to since graduation.',
         'Add tags (clubs, sports, dorm hall, etc.) to help classmates find you and see what you had in common.',
         'Upload "Then" and "Now" photos — click the photo area to select a file from your device.',
-        'You can also add up to 9 additional photos to your personal gallery (with a caption if you wish). Click a gallery photo to view it full-screen.',
+        `You can also add up to ${GALLERY_LIMIT} additional photos to your personal gallery (with a caption if you wish). Click a gallery photo to view it full-screen.`,
       ])}
 
       {section('Directory', [

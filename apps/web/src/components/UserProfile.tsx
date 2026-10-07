@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import jsPDF from 'jspdf';
 import { useAppContext } from '../context/AppContext';
 import api from '../api';
-import { User, Profile, GalleryPhoto, Comment } from '../types';
+import { User, Profile, GalleryPhoto, Comment, GALLERY_LIMIT } from '../types';
 import { galleryAPI } from '../apiClient';
 import { AVATAR_COLORS } from '../avatarColors';
 
@@ -194,7 +194,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
   // before anything is uploaded.
   const startGalleryUpload = (file: File) => {
     if (!file || !isOwnProfile || !profileUserId) return;
-    if (galleryPhotos.length >= 9) { setError('Gallery limit of 9 photos reached.'); return; }
+    if (galleryPhotos.length >= GALLERY_LIMIT) { setError(`Gallery limit of ${GALLERY_LIMIT} photos reached.`); return; }
     setUploadCaption('');
     setPendingUpload({ file, previewUrl: URL.createObjectURL(file) });
   };
@@ -797,9 +797,9 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
           <div className="bg-white rounded-lg border border-[#E2E8F0] p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-[#94A3B8] uppercase tracking-[0.12em]">
-                Gallery ({galleryPhotos.length}/9)
+                Gallery ({galleryPhotos.length}/{GALLERY_LIMIT})
               </h3>
-              {isOwnProfile && galleryPhotos.length < 9 && (
+              {isOwnProfile && galleryPhotos.length < GALLERY_LIMIT && (
                 <>
                   <input
                     type="file"
@@ -818,7 +818,7 @@ const UserProfile: React.FC<{ userId?: number | string }> = ({ userId }) => {
             </div>
             {galleryPhotos.length === 0 ? (
               <div className="py-8 text-center text-[#94A3B8] text-sm bg-[#F6F8FC] rounded-lg border border-dashed border-[#E2E8F0]">
-                {isOwnProfile ? 'No gallery photos yet. Add up to 9 photos.' : 'No gallery photos.'}
+                {isOwnProfile ? `No gallery photos yet. Add up to ${GALLERY_LIMIT} photos.` : 'No gallery photos.'}
               </div>
             ) : (
               <div className="grid grid-cols-3 gap-3">
