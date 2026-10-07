@@ -14,6 +14,62 @@ import { ClassesRepository } from './classes.repository.js';
 /** Class years are seeded from this year forward; nothing older can be linked. */
 const EARLIEST_CLASS_YEAR = 1950;
 
+/** Photos per page on the class photo page. */
+const DEFAULT_GALLERY_PAGE_SIZE = 24;
+
+/**
+ * A ceiling, because `pageSize` comes from the query string and every photo on
+ * a page costs an S3 signature. Without it `?pageSize=100000` asks the API to
+ * presign the entire class in one request — the exact cost paginating exists
+ * to avoid.
+ */
+const MAX_GALLERY_PAGE_SIZE = 100;
+
+/** The two orderings the class photo page offers, mapped to SQL. */
+const GALLERY_ORDERS = {
+  oldest: 'ASC',
+  newest: 'DESC',
+} as const;
+
+export type GalleryOrder = keyof typeof GALLERY_ORDERS;
+
+/**
+ * `page`, `pageSize` and `order` out of a query string, clamped.
+ *
+ * Everything here arrives as an untrusted string. `parseInt` answers NaN for
+ * "abc" and -3 for "-3", and either one reaches SQL as a negative OFFSET,
+ * which Postgres rejects with a 500 for what is really a bad request. So each
+ * value is floored at 1 and `pageSize` is also capped; an unrecognised `order`
+ * falls back to the default rather than 400ing, since a bad sort key is not
+ * worth failing a page load over.
+ */
+function parseGalleryPaging(query: Record<string, string>): {
+  page: number;
+  pageSize: number;
+  order: GalleryOrder;
+  direction: 'ASC' | 'DESC';
+} {
+  const asPositiveInt = (raw: string | undefined, fallback: number) => {
+    const parsed = parseInt(raw ?? '', 10);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : fallback;
+  };
+
+  const order: GalleryOrder =
+    query.order === 'oldest' || query.order === 'newest'
+      ? query.order
+      : 'newest';
+
+  return {
+    page: asPositiveInt(query.page, 1),
+    pageSize: Math.min(
+      asPositiveInt(query.pageSize, DEFAULT_GALLERY_PAGE_SIZE),
+      MAX_GALLERY_PAGE_SIZE,
+    ),
+    order,
+    direction: GALLERY_ORDERS[order],
+  };
+}
+
 /**
  * `/api/classes` plus `GET /api/schools/:schoolId/classes`, ported from
  * `lambda/classes.ts`.
@@ -183,6 +239,60 @@ export class ClassesService {
       ).filter((photo) => !!photo.url);
 
       return { photos };
+    } catch (error) {
+      rethrowAsInternal(error, 'Internal server error.', this.logger);
+    }
+  }
+
+  /**
+   * One page of the class's gallery uploads, for the class photo page.
+   *
+   * Deliberately *not* `getPhotos` with a LIMIT bolted on, for two reasons.
+   *
+   * It returns gallery uploads only. Then/now portraits have no upload
+   * timestamp anywhere in the schema — `setPhotoKey` writes the column and
+   * nothing else, not even `profiles.updated_at` — so there is no honest way
+   * to place them in an order-by-upload-date list. Including them sorted by
+   * something that merely looks like a date would be worse than leaving them
+   * out, because it would look right.
+   *
+   * It also presigns only the rows on the page. `getPhotos` resolves every key
+   * in the class on every call, which is one S3 signature per photo and the
+   * thing that stops scaling first.
+   */
+  async getGalleryPhotos(
+    classId: string,
+    authUser: AuthUser,
+    query: Record<string, string> = {},
+  ) {
+    try {
+      await this.assertClassAccess(authUser, classId);
+
+      const { page, pageSize, order, direction } = parseGalleryPaging(query);
+      const offset = (page - 1) * pageSize;
+
+      const [total, rows] = await Promise.all([
+        this.repo.countClassGalleryPhotos(classId),
+        this.repo.listClassGalleryPhotos(classId, direction, pageSize, offset),
+      ]);
+
+      // A key whose object is missing resolves to null. Unlike the slideshow,
+      // those are kept rather than dropped: holes here are a page shorter than
+      // its pageSize, and silently removing them would make the page counts
+      // disagree with `total`. The client renders a placeholder instead.
+      const photos = await Promise.all(
+        rows.map(async (row) => ({
+          id: row.id,
+          url: await this.s3.resolve(row.s3_key),
+          caption: row.caption,
+          created_at: row.created_at,
+          userId: row.user_id,
+          firstName: row.first_name,
+          lastName: row.last_name,
+        })),
+      );
+
+      return { photos, total, page, pageSize, order };
     } catch (error) {
       rethrowAsInternal(error, 'Internal server error.', this.logger);
     }

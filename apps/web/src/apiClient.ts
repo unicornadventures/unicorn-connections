@@ -1,5 +1,5 @@
 import api from './api';
-import { User, Profile, School, Class, SchoolClass, RosterEntry, AuthResponse, CurrentUser, SlideshowPhoto, Feedback } from './types';
+import { User, Profile, School, Class, SchoolClass, RosterEntry, AuthResponse, CurrentUser, SlideshowPhoto, ClassGalleryPhoto, GalleryOrder, Feedback } from './types';
 
 // Auth endpoints
 export const authAPI = {
@@ -89,6 +89,23 @@ export const classAPI = {
     api.get<{ members: (User & { profile: Profile | null })[] }>(`/classes/${classId}/members`),
   getPhotos: (classId: number, userId: number) =>
     api.get<{ photos: SlideshowPhoto[] }>(`/classes/${classId}/photos`, { params: { userId } }),
+
+  /**
+   * One page of the class's gallery uploads. `total` counts every photo in the
+   * class, not the page, so the client can size its pager without a second
+   * request.
+   */
+  getGalleryPhotos: (
+    classId: number,
+    params: { page: number; pageSize: number; order: GalleryOrder },
+  ) =>
+    api.get<{
+      photos: ClassGalleryPhoto[];
+      total: number;
+      page: number;
+      pageSize: number;
+      order: GalleryOrder;
+    }>(`/classes/${classId}/gallery-photos`, { params }),
 };
 
 // Admin class endpoints

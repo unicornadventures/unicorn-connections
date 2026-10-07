@@ -57,6 +57,7 @@ const HelpPage: React.FC = () => (
         'Photos are stored securely and only visible to logged-in classmates.',
         'Gallery photos appear in a 3-column grid on your profile. Click any photo to open it in full-screen.',
         'Click "Slideshow" in the top navigation to see a random slideshow of all the photos your classmates have uploaded to their profiles.',
+        'Click "Class Photos" to browse your class\'s gallery uploads a page at a time, newest or oldest first. Click any photo to open it full-screen, or the name under it to visit that classmate.',
       ])}
 
       {section('Account & Security', [

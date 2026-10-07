@@ -9,6 +9,7 @@ const NAV_LINKS = [
   { to: '/directory', label: 'Directory' },
   { to: '/events', label: 'Events' },
   { to: '/slideshow', label: 'Slideshow' },
+  { to: '/class-photos', label: 'Class Photos' },
   { to: '/comments', label: 'My Comments' },
   { to: '/help', label: 'Help' },
   ...(FEEDBACK_ENABLED ? [{ to: '/feedback', label: 'Feedback' }] : []),

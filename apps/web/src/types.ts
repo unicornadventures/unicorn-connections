@@ -98,6 +98,27 @@ export interface SlideshowPhoto {
 }
 
 /**
+ * One photo on the class photo page, which lists the whole class's gallery
+ * uploads rather than one member's.
+ *
+ * `url` is nullable here where `SlideshowPhoto.url` is not: the slideshow drops
+ * photos whose object has gone missing because it cannot render a hole, while
+ * this page keeps them so the page length still matches the page size.
+ */
+export interface ClassGalleryPhoto {
+  id: number;
+  url: string | null;
+  caption: string | null;
+  created_at: string;
+  userId: number;
+  firstName: string | null;
+  lastName: string | null;
+}
+
+/** Which end of the upload history the class photo page starts from. */
+export type GalleryOrder = 'newest' | 'oldest';
+
+/**
  * One row of the admin roster form, and of a CSV import.
  *
  * `original_*` map to the `former_*` profile columns — the names someone
