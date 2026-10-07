@@ -1,3 +1,4 @@
+import { GALLERY_LIMIT } from '@classyear/shared-types';
 import type { AuthUser } from '../common/auth-user.js';
 import type { ClassScopeService } from '../common/class-scope/class-scope.service.js';
 import { expectRejection } from '../../test/support/expect-rejection.js';
@@ -350,25 +351,25 @@ describe('PhotosService caption handling', () => {
 });
 
 describe('PhotosService gallery limit', () => {
-  it('refuses at nine photos', async () => {
-    const service = serviceWith({ countGalleryPhotos: async () => 9 });
+  it('refuses once the gallery is at the limit', async () => {
+    const service = serviceWith({ countGalleryPhotos: async () => GALLERY_LIMIT });
 
     await expectRejection(
       service.createGalleryUploadUrl('10', 'One more', asUser()),
       400,
-      'Gallery limit of 9 photos reached.',
+      `Gallery limit of ${GALLERY_LIMIT} photos reached.`,
     );
   });
 
-  it('allows the ninth', async () => {
+  it('allows the one that reaches the limit', async () => {
     const service = serviceWith({
-      countGalleryPhotos: async () => 8,
+      countGalleryPhotos: async () => GALLERY_LIMIT - 1,
       findPlacement: async () => placement,
-      insertGalleryPhoto: async () => 9,
+      insertGalleryPhoto: async () => GALLERY_LIMIT,
     });
 
     await expect(
-      service.createGalleryUploadUrl('10', 'Ninth', asUser()),
+      service.createGalleryUploadUrl('10', 'The last one', asUser()),
     ).resolves.toBeDefined();
   });
 
@@ -379,14 +380,14 @@ describe('PhotosService gallery limit', () => {
    */
   it('reports the limit before checking the user exists', async () => {
     const service = serviceWith({
-      countGalleryPhotos: async () => 9,
+      countGalleryPhotos: async () => GALLERY_LIMIT,
       findPlacement: async () => undefined,
     });
 
     await expectRejection(
       service.createGalleryUploadUrl('9999', 'x', asUser({ is_admin: true })),
       400,
-      'Gallery limit of 9 photos reached.',
+      `Gallery limit of ${GALLERY_LIMIT} photos reached.`,
     );
   });
 });

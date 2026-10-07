@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { GALLERY_LIMIT } from '@classyear/shared-types';
 import type { AuthUser } from '../common/auth-user.js';
 import { ClassScopeService } from '../common/class-scope/class-scope.service.js';
 import { rethrowAsInternal } from '../common/http-errors.js';
@@ -14,9 +15,6 @@ import {
   type PhotoType,
   type UserPlacement,
 } from './photos.repository.js';
-
-/** A user may keep at most this many gallery photos. */
-const GALLERY_LIMIT = 9;
 
 /** Captions are stored in a VARCHAR(255). */
 const CAPTION_MAX_LENGTH = 255;

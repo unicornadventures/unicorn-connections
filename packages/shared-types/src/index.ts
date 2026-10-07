@@ -224,3 +224,17 @@ export type AvatarColor = (typeof AVATAR_COLORS)[number];
 export const isValidAvatarColor = (color: unknown): color is AvatarColor =>
   typeof color === 'string' &&
   (AVATAR_COLORS as readonly string[]).includes(color);
+
+/**
+ * How many gallery photos a user may keep on their profile, beyond the two
+ * then/now portraits.
+ *
+ * Shared for the same reason as `AVATAR_COLORS`: it is enforced on **both**
+ * sides. `POST /api/users/:userId/gallery` is the real gate — it 400s with
+ * 'Gallery limit of N photos reached.' — while the web client hides the upload
+ * control and renders the `n/N` counter from the same number. It was previously
+ * written out in eight places across the two apps, so raising it meant finding
+ * every one; the API's error string and the client's are both built from this
+ * constant now, which is what keeps them saying the same thing.
+ */
+export const GALLERY_LIMIT = 25;
