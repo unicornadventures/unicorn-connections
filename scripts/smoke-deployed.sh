@@ -36,6 +36,50 @@ check() { # description, expected, actual
   fi
 }
 
+# Every call site used to be `$(curl -w '%{http_code}' ... || echo 000)`, which
+# reports 000000 on failure rather than 000: curl prints its own 000 *and* the
+# `|| echo` appends a second. A code that matches nothing and names no cause.
+#
+# curl's exit status is the part worth keeping — 6 is "could not resolve host",
+# which is a different problem from a server that did not answer, so the two
+# are not flattened into one unusable number.
+http_code() { # curl args... ; echoes the HTTP code, or "dns" / "000"
+  # `rc`, not `status`: the latter is a read-only builtin in zsh, so naming it
+  # that makes these functions explode the moment anyone sources them from an
+  # interactive shell. Harmless under this file's bash shebang, and no reason
+  # to leave the landmine.
+  local code rc
+  code="$(curl -s -o /dev/null -w '%{http_code}' "$@" 2>/dev/null)"
+  rc=$?
+  if [ "$rc" -eq 6 ]; then
+    echo dns
+  elif [ "$rc" -ne 0 ] || [ -z "$code" ]; then
+    echo 000
+  else
+    echo "$code"
+  fi
+}
+
+# Whether a *public name* is served, as the world sees it rather than as this
+# machine does.
+#
+# The distinction is not academic. The apex handover created records for four
+# names that had none, and every resolver which had looked them up while they
+# were dark holds NXDOMAIN for up to the zone's negative TTL — 86400 here, a
+# full day. The gate then failed all four with a connect error while curl
+# --resolve fetched 200 from each, because the only broken thing was the cache
+# on the laptop running the gate. "Is the cutover done" is a question about
+# DNS and CloudFront, so ask a resolver that was never poisoned and connect to
+# the address it gives.
+RESOLVER="${RESOLVER:-8.8.8.8}"
+served_code() { # domain ; echoes the HTTP code, or "unresolved"
+  local domain="$1" ip
+  ip="$(dig +short "@$RESOLVER" "$domain" A 2>/dev/null \
+    | grep -E '^[0-9]+(\.[0-9]+){3}$' | head -1)"
+  [ -n "$ip" ] || { echo unresolved; return; }
+  http_code --max-time 30 --resolve "$domain:443:$ip" "https://$domain/"
+}
+
 echo "==> New stack ($STACK)"
 PULSE="$(out "$STACK" PulseUrl)"
 FRONTEND="$(out "$STACK" FrontendUrl)"
@@ -47,20 +91,22 @@ fi
 
 # A cold Aurora cluster takes ~15s to resume, and /pulse does not touch the
 # database — but the function's cold start still has to complete.
-code="$(curl -s -o /tmp/pulse-body -w '%{http_code}' --max-time 60 "$PULSE" || echo 000)"
+code="$(curl -s -o /tmp/pulse-body -w '%{http_code}' --max-time 60 "$PULSE" 2>/dev/null)"
 check "GET /pulse" 200 "$code"
 if [ "$code" = "200" ]; then
   printf '     %s\n' "$(cat /tmp/pulse-body)"
 fi
 
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "${PULSE%/pulse}/api/schools" || echo 000)"
-check "GET /api/schools (public, hits the database)" 200 "$code"
+check "GET /api/schools (public, hits the database)" 200 \
+  "$(http_code --max-time 60 "${PULSE%/pulse}/api/schools")"
 
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${PULSE%/pulse}/api/users/1" || echo 000)"
-check "GET /api/users/1 unauthenticated is refused" 401 "$code"
+check "GET /api/users/1 unauthenticated is refused" 401 \
+  "$(http_code --max-time 30 "${PULSE%/pulse}/api/users/1")"
 
-code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$FRONTEND" || echo 000)"
-check "frontend over HTTPS" 200 "$code"
+# Deliberately served_code, not a bare curl: after the apex handover FRONTEND
+# is a public name, and a stale negative DNS entry on the machine running the
+# gate would otherwise read as the site being down. See the helper.
+check "frontend over HTTPS" 200 "$(served_code "${FRONTEND#https://}")"
 
 # ---------------------------------------------------------------------------
 # Photos
@@ -93,8 +139,7 @@ if [ "$KEY" = "None" ] || [ -z "$KEY" ]; then
 else
   printf '  ✅ %-52s %s\n' "photo bucket holds objects" "$BUCKET"
   url="$(aws s3 presign "s3://$BUCKET/$KEY" --region "$REGION" --expires-in 120)"
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$url" || echo 000)"
-  check "presigned GET of a real photo" 200 "$code"
+  check "presigned GET of a real photo" 200 "$(http_code --max-time 30 "$url")"
 fi
 
 # Uploads are presigned PUTs from the browser, so the *bucket* answers the
@@ -102,9 +147,9 @@ fi
 # like "uploads are broken" while pictures still appear. Both directions are
 # checked: the origin must be allowed, and an unlisted one must not be.
 preflight() {
-  curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X OPTIONS \
+  http_code --max-time 30 -X OPTIONS \
     "https://${BUCKET}.s3.amazonaws.com/${KEY}" \
-    -H "Origin: $1" -H 'Access-Control-Request-Method: PUT' || echo 000
+    -H "Origin: $1" -H 'Access-Control-Request-Method: PUT'
 }
 check "upload preflight from $FRONTEND" 200 "$(preflight "$FRONTEND")"
 check "upload preflight from an unlisted origin is refused" 403 \
@@ -125,13 +170,21 @@ for domain in unicornconnections.org www.unicornconnections.org \
   holder="$(aws cloudfront list-distributions --region "$REGION" \
     --query "DistributionList.Items[?contains(Aliases.Items || \`[]\`, '$domain')].Id | [0]" \
     --output text 2>/dev/null || echo None)"
-  served="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "https://$domain" || echo 000)"
+  served="$(served_code "$domain")"
 
   if [ "$served" = "200" ] && [ "$holder" = "$NEW_DIST" ]; then
     printf '  ✅ %-30s HTTP %s, served by %s\n' "$domain" "$served" "$holder"
+    # Green for the world, broken here: say so plainly instead of letting
+    # someone conclude from a browser that the cutover failed.
+    if [ "$(http_code --max-time 10 "https://$domain/")" = "dns" ]; then
+      printf '     ⚠️  not resolvable on THIS machine — stale negative DNS cache,\n'
+      printf '         not the deploy. macOS: sudo dscacheutil -flushcache &&\n'
+      printf '         sudo killall -HUP mDNSResponder\n'
+    fi
   else
     printf '  ❌ %-30s HTTP %s, alias held by %s (expected %s)\n' \
       "$domain" "$served" "$holder" "$NEW_DIST" >&2
+    [ "$served" = "unresolved" ] && printf '     no A record from %s — the DNS records are missing\n' "$RESOLVER" >&2
     fail=1
   fi
 done

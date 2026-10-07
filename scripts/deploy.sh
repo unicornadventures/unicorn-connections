@@ -119,21 +119,65 @@ OVERRIDES=(
 
 if $DRY_RUN; then
   echo "==> Creating a changeset only (nothing will be executed)"
+
+  # Trust nothing: prove afterwards that the stack did not move.
+  #
+  # This used to read the stack status and accept only ABSENT or
+  # REVIEW_IN_PROGRESS, on the grounds that a dry-run leaves nothing behind.
+  # That holds for a stack which has never been deployed, and is wrong for
+  # every dry-run after the first: a *pending* changeset correctly leaves an
+  # existing stack UPDATE_COMPLETE, so the check fired "the changeset was
+  # executed" on honest dry-runs. A warning that cries wolf every time is one
+  # nobody reads the day it is right.
+  #
+  # Whether it ran is a question about change, so compare before and after
+  # rather than guessing which statuses are reachable.
+  fingerprint() {
+    aws cloudformation describe-stacks --stack-name classyear-nest \
+      --region us-east-1 --query 'Stacks[0].[StackStatus,LastUpdatedTime]' \
+      --output text 2>/dev/null || echo ABSENT
+  }
+  before="$(fingerprint)"
+
   # Both flags. --no-execute-changeset alone was not enough: with
   # confirm_changeset=true in samconfig, a dry-run created the stack anyway.
-  sam deploy --no-execute-changeset --no-confirm-changeset \
-    --parameter-overrides "${OVERRIDES[@]}"
+  #
+  # Output is captured rather than streamed because the exit status has to be
+  # inspected: `sam deploy` treats an empty changeset as an *error*, and under
+  # `set -e` that killed the dry-run before it reported anything at all.
+  # "Nothing to deploy" is the most reassuring thing a dry-run can say.
+  set +e
+  sam_out="$(sam deploy --no-execute-changeset --no-confirm-changeset \
+    --parameter-overrides "${OVERRIDES[@]}" 2>&1)"
+  sam_rc=$?
+  set -e
+  printf '%s\n' "$sam_out"
 
-  # Trust nothing: report what actually exists afterwards. A dry-run should
-  # leave the stack absent or REVIEW_IN_PROGRESS — anything else means it ran.
-  status="$(aws cloudformation describe-stacks --stack-name classyear-nest \
-    --region us-east-1 --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo ABSENT)"
+  if [ "$sam_rc" -ne 0 ]; then
+    if printf '%s' "$sam_out" | grep -q 'No changes to deploy'; then
+      echo
+      echo "==> No changes — the deployed stack already matches this template."
+      exit 0
+    fi
+    echo >&2
+    echo "==> sam deploy failed (exit $sam_rc) — see the output above." >&2
+    exit "$sam_rc"
+  fi
+
+  after="$(fingerprint)"
   echo
-  echo "==> Stack status after dry-run: $status"
-  case "$status" in
-    ABSENT | REVIEW_IN_PROGRESS) ;;
-    *) echo "    ^ NOT a dry-run outcome. The changeset was executed." >&2 ;;
-  esac
+  echo "==> Stack after dry-run: $after"
+
+  # The one legitimate transition: the first changeset against a stack that
+  # does not exist yet brings it into being as REVIEW_IN_PROGRESS.
+  if [ "$before" = "$after" ]; then
+    echo "    unchanged — changeset created, not executed."
+  elif [ "$before" = "ABSENT" ] && [ "${after%%[[:space:]]*}" = "REVIEW_IN_PROGRESS" ]; then
+    echo "    new stack in REVIEW_IN_PROGRESS — changeset created, not executed."
+  else
+    echo "    ^ the stack CHANGED (was: $before). The changeset was executed." >&2
+    exit 1
+  fi
   exit 0
 fi
 
