@@ -10,7 +10,7 @@ npm run dev --workspace @classyear/web    # http://localhost:5173
 It needs the API running (`npm run dev` at the repo root, port 5001). Copy
 `.env.example` to `.env` to route requests through the Vite proxy; without it,
 `src/api.ts` falls back to `http://localhost:5001/api` directly, which also works
-because `main.ts` enables CORS for `FRONTEND_URL`.
+because `bootstrap.ts` enables CORS for `FRONTEND_URL`.
 
 ## Tests
 

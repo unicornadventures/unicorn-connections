@@ -9,8 +9,8 @@ import path from 'path';
  *    dev server, which proxies them below. Same-origin, so CORS never enters
  *    into it. This is how the source app was set up.
  *  - Leaving it unset falls back to the absolute `http://localhost:5001/api` in
- *    `src/api.ts`. Cross-origin, which works because `main.ts` enables CORS for
- *    `FRONTEND_URL`.
+ *    `src/api.ts`. Cross-origin, which works because `bootstrap.ts` enables CORS
+ *    for `FRONTEND_URL`.
  *
  * The proxy target moved from 3001 to 5001 with the port: the source's Express
  * server listened on 3001, the Nest server listens on `PORT` (default 5001).
