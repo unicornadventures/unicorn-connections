@@ -125,13 +125,17 @@ Parameters:
 
   ClaimPublicNames:
     Type: String
-    Default: 'false'
+    Default: 'true'
     AllowedValues: ['false', 'true']
     Description: >-
-      Whether this distribution claims the four public names. A CloudFront alias
-      belongs to one distribution account-wide, so this must stay 'false' until
-      the old stack has released them, then flip to 'true' — which is the
-      cutover, and the only moment the sites are down.
+      Whether this distribution claims the four public names and their DNS
+      records. 'true' since the cutover, because this distribution is what
+      serves them — the parameter creates those records, so a deploy that
+      defaulted to 'false' would remove them and take all four domains down.
+      It defaulted to 'false' while the old stack still held the aliases, since
+      a CloudFront alias belongs to one distribution account-wide and claiming
+      them early fails the deploy. Setting 'false' now is a deliberate
+      rollback, not a safe default.
 
   SesSenderDomain:
     Type: String
