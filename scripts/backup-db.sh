@@ -9,8 +9,12 @@
 # The Aurora cluster is not publicly accessible, so this goes through the
 # stack's Session Manager bastion (BastionInstance in infra/template.yaml):
 # start it if it is stopped, forward a local port to the cluster, pg_dump over
-# that, then stop the bastion again if this run started it. No SSH and no open
-# inbound port — access is your AWS identity's ssm:StartSession.
+# that, then stop the bastion. No SSH and no open inbound port — access is your
+# AWS identity's ssm:StartSession.
+#
+# It stops the bastion even when it found it running, because a deploy that
+# creates or replaces the instance leaves it running and nothing else would
+# stop it. That ends any other session through it; --keep-running opts out.
 #
 # Needs, locally:
 #   * the Session Manager plugin   brew install --cask session-manager-plugin
@@ -78,7 +82,6 @@ if nc -z localhost "$LOCAL_PORT" 2>/dev/null; then
   exit 1
 fi
 
-STARTED=false
 TUNNEL_PID=""
 TUNNEL_LOG="$(mktemp -t backup-db-tunnel)"
 
@@ -92,7 +95,7 @@ cleanup() {
       --session-id "$session" >/dev/null 2>&1 || true
   fi
   rm -f "$TUNNEL_LOG"
-  if $STARTED && ! $KEEP_RUNNING; then
+  if ! $KEEP_RUNNING; then
     echo "==> Stopping the bastion"
     aws ec2 stop-instances --region "$REGION" --instance-ids "$INSTANCE" >/dev/null
   fi
@@ -111,7 +114,6 @@ case "$(state)" in
     aws ec2 wait instance-stopped --region "$REGION" --instance-ids "$INSTANCE"
     echo "    starting $INSTANCE"
     aws ec2 start-instances --region "$REGION" --instance-ids "$INSTANCE" >/dev/null
-    STARTED=true
     aws ec2 wait instance-running --region "$REGION" --instance-ids "$INSTANCE"
     ;;
   *) echo "Bastion $INSTANCE is $(state); not touching it." >&2; exit 1 ;;
