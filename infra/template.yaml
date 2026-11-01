@@ -196,9 +196,35 @@ Parameters:
       live stack — which matters, since phase 8 is meant to be the only phase
       that touches it.
 
+  EnableBastion:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+    Description: >-
+      Whether to run the Session Manager bastion that scripts/backup-db.sh
+      tunnels through to reach the database. scripts/deploy.sh passes 'true';
+      this default only matters to a deploy that bypasses it.
+
+  PublicSubnet:
+    Type: String
+    Default: subnet-09e87317804aade0b
+    Description: >-
+      Public-Subnet-1, for the bastion. Public so it reaches the Session
+      Manager services over the internet gateway — the VPC has no NAT and no
+      ssmmessages or ec2messages endpoints.
+
+  BastionImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: >-
+      Resolved on every deploy, so a deploy after a new AMI is published
+      replaces the bastion with a patched one. It holds no state, so that is
+      the patching strategy rather than a hazard.
+
 Conditions:
   # Gates the four public aliases and their DNS records. See the parameter.
   PublicNamesClaimed: !Equals [!Ref ClaimPublicNames, 'true']
+  BastionEnabled: !Equals [!Ref EnableBastion, 'true']
 
 Resources:
 
@@ -447,6 +473,82 @@ Resources:
       SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
 
   # ---------------------------------------------------------------------------
+  # Bastion: a Session Manager port-forward to the database, for backups
+  # ---------------------------------------------------------------------------
+  #
+  # The cluster is not publicly accessible, so `pg_dump` from a laptop needs a
+  # host inside the VPC to forward through. scripts/backup-db.sh starts this
+  # instance, forwards localhost to the cluster over Session Manager, dumps,
+  # and stops it again — it spends its life stopped.
+  #
+  # No SSH: no key pair, and no inbound rule at all. Access is whatever the
+  # caller's IAM identity allows for ssm:StartSession.
+  #
+  # It joins the existing Lambda security group rather than getting one of its
+  # own, and that is load-bearing, not a shortcut. Two groups owned by
+  # classyear-serverless gate the paths it needs: the cluster's admits 5432
+  # only from that group, and the SSM interface endpoint's admits 443 only
+  # from it. Private DNS sends ssm.us-east-1.amazonaws.com to that endpoint
+  # from anywhere in the VPC, public subnets included, so a bastion in a group
+  # of its own could not even register with Session Manager — and admitting a
+  # new group would mean editing the other stack's resources. The Lambda
+  # group has no inbound rules, so membership grants reach and nothing else.
+
+  BastionRole:
+    Type: AWS::IAM::Role
+    Condition: BastionEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      # Session Manager only. It does not read the database secret: the
+      # backup script does that with the caller's credentials, so the instance
+      # never holds them.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: BastionEnabled
+    Properties:
+      Roles: [!Ref BastionRole]
+
+  BastionLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Condition: BastionEnabled
+    Properties:
+      LaunchTemplateData:
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeType: gp3
+              VolumeSize: 8
+              Encrypted: true
+              DeleteOnTermination: true
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Condition: BastionEnabled
+    Properties:
+      ImageId: !Ref BastionImageId
+      InstanceType: t4g.nano
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref LambdaSecurityGroupId]
+      IamInstanceProfile: !Ref BastionInstanceProfile
+      LaunchTemplate:
+        LaunchTemplateId: !Ref BastionLaunchTemplate
+        Version: !GetAtt BastionLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub 'classyear-${Environment}-bastion'
+
+  # ---------------------------------------------------------------------------
   # Frontend hosting: S3 + CloudFront + ACM + Route53
   # ---------------------------------------------------------------------------
 
@@ -655,3 +757,7 @@ Outputs:
   DatabaseEndpoint:
     Description: Shared with classyear-serverless — this stack does not own it
     Value: !Ref DatabaseHost
+  BastionInstanceId:
+    Condition: BastionEnabled
+    Description: Session Manager target for scripts/backup-db.sh
+    Value: !Ref BastionInstance

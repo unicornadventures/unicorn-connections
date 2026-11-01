@@ -50,6 +50,7 @@ docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}' 
 | `./scripts/bundle-lambda.sh` | esbuild the API into `infra/build/` Lambda artifacts |
 | `JWT_SECRET=… ./scripts/deploy.sh --dry-run` | Changeset only — proves the template applies |
 | `./scripts/smoke-deployed.sh` | Post-deploy gate against the live stack |
+| `./scripts/backup-db.sh` | `pg_dump` production to `tmp/backups/`, tunnelled through the Session Manager bastion |
 
 ## Deployment
 
