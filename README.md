@@ -51,6 +51,8 @@ docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}' 
 | `JWT_SECRET=… ./scripts/deploy.sh --dry-run` | Changeset only — proves the template applies |
 | `./scripts/smoke-deployed.sh` | Post-deploy gate against the live stack |
 | `./scripts/backup-db.sh` | `pg_dump` production to `tmp/backups/`, tunnelled through the Session Manager bastion |
+| `./scripts/backup-photos.sh` | Copy every uploaded photo to `tmp/backups/photos/`, verified, with a manifest per run |
+| `./scripts/restore-photos.sh --dry-run` | Put backed-up photos back — only missing ones unless `--overwrite` |
 
 ## Deployment
 
