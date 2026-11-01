@@ -25,17 +25,16 @@ DRY_RUN=false
 # classyear-serverless uses: this stack shares its network, its S3/SecretsManager/
 # SSM endpoints, its Aurora cluster and its photo bucket.
 ENVIRONMENT="${ENVIRONMENT:-nest}"
-# The canonical domain. The other three public names are served by the
-# same distribution; only this one goes in FRONTEND_URL and email links.
+# The one public domain since reunion-connect.org was retired (2026-11-01):
+# it and www are served by this distribution, and it is the name in
+# FRONTEND_URL and email links.
 DOMAIN_NAME="${DOMAIN_NAME:-unicornconnections.org}"
 HOSTED_ZONE_ID="${HOSTED_ZONE_ID:-Z04780762C3Q0K0DKRGSP}"
-SECONDARY_DOMAIN_NAME="${SECONDARY_DOMAIN_NAME:-reunion-connect.org}"
-SECONDARY_HOSTED_ZONE_ID="${SECONDARY_HOSTED_ZONE_ID:-Z0466195259YGZ44DUBMY}"
-STAGING_DOMAIN_NAME="${STAGING_DOMAIN_NAME:-nest.reunion-connect.org}"
-# 'true' since the cutover. This distribution holds the four public names and
+STAGING_DOMAIN_NAME="${STAGING_DOMAIN_NAME:-nest.unicornconnections.org}"
+# 'true' since the cutover. This distribution holds the public names and
 # their DNS records, so the default has to assert that rather than ask for it:
 # the parameter is what *creates* those records, and a deploy that defaulted to
-# 'false' would quietly remove them — taking all four public domains down as a
+# 'false' would quietly remove them — taking the site down as a
 # side effect of shipping something unrelated. It defaulted to 'false' through
 # phases 7-8, when the old stack still held the aliases and claiming them early
 # would have failed the deploy.
@@ -94,14 +93,13 @@ sam validate --lint --region us-east-1
 # state, the second says the records are missing and this deploy will recreate
 # them.
 if [ "$CLAIM_PUBLIC_NAMES" = "true" ]; then
-  echo "==> Checking the four public aliases"
+  echo "==> Checking the public aliases"
   OURS="$(aws cloudformation describe-stacks --stack-name classyear-nest --region us-east-1 \
     --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionId'].OutputValue" \
     --output text 2>/dev/null || echo none)"
 
   blocked=0
-  for name in "$DOMAIN_NAME" "www.$DOMAIN_NAME" \
-              "$SECONDARY_DOMAIN_NAME" "www.$SECONDARY_DOMAIN_NAME"; do
+  for name in "$DOMAIN_NAME" "www.$DOMAIN_NAME"; do
     holder="$(aws cloudfront list-distributions --region us-east-1 \
       --query "DistributionList.Items[?contains(Aliases.Items || \`[]\`, '$name')].Id | [0]" \
       --output text 2>/dev/null || echo None)"
@@ -130,8 +128,6 @@ OVERRIDES=(
   "Environment=$ENVIRONMENT"
   "DomainName=$DOMAIN_NAME"
   "HostedZoneId=$HOSTED_ZONE_ID"
-  "SecondaryDomainName=$SECONDARY_DOMAIN_NAME"
-  "SecondaryHostedZoneId=$SECONDARY_HOSTED_ZONE_ID"
   "StagingDomainName=$STAGING_DOMAIN_NAME"
   "ClaimPublicNames=$CLAIM_PUBLIC_NAMES"
   "SesSenderDomain=$SES_SENDER_DOMAIN"
