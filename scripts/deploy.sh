@@ -57,6 +57,11 @@ DATABASE_HOST="${DATABASE_HOST:-classyear-dev.cluster-cezswsoi8m3o.us-east-1.rds
 FILE_BUCKET_NAME="${FILE_BUCKET_NAME:-classyear-file-storage-372666940943-dev}"
 DATABASE_SECRET_ARN="${DATABASE_SECRET_ARN:-arn:aws:secretsmanager:us-east-1:372666940943:secret:rds!cluster-328925d7-720f-4ad3-9694-8c52236e81f2-yt8gVR}"
 LAMBDA_SECURITY_GROUP_ID="${LAMBDA_SECURITY_GROUP_ID:-sg-02fa56b60b644cc22}"
+# The Session Manager bastion scripts/backup-db.sh tunnels through. 'true' for
+# the same reason CLAIM_PUBLIC_NAMES is: the parameter is what creates it, so a
+# 'false' default would delete it on the next deploy that did not think to ask.
+ENABLE_BASTION="${ENABLE_BASTION:-true}"
+PUBLIC_SUBNET="${PUBLIC_SUBNET:-subnet-09e87317804aade0b}"
 
 if [ -z "${JWT_SECRET:-}" ]; then
   echo "JWT_SECRET is required (NoEcho in the template, never committed)." >&2
@@ -137,6 +142,8 @@ OVERRIDES=(
   "DatabaseSecretArn=$DATABASE_SECRET_ARN"
   "FileBucketName=$FILE_BUCKET_NAME"
   "LambdaSecurityGroupId=$LAMBDA_SECURITY_GROUP_ID"
+  "EnableBastion=$ENABLE_BASTION"
+  "PublicSubnet=$PUBLIC_SUBNET"
 )
 
 if $DRY_RUN; then
