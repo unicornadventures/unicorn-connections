@@ -55,12 +55,10 @@ Globals:
           - PublicNamesClaimed
           - !Sub 'https://${DomainName}'
           - !Sub 'https://${StagingDomainName}'
-        # The other three names. `origin` as a single string permits exactly one
-        # origin, and every deployed API call is cross-origin, so
-        # without this three of the four public names fail every request in the
-        # browser. Listed unconditionally: an origin that is not yet serving is
-        # harmless, and it means the cutover does not depend on this changing.
-        CORS_ORIGINS: !Sub 'https://www.${DomainName},https://${SecondaryDomainName},https://www.${SecondaryDomainName},https://${StagingDomainName}'
+        # The other names. `origin` as a single string permits exactly one
+        # origin, and every deployed API call is cross-origin, so without this
+        # the www name and the staging name fail every request in the browser.
+        CORS_ORIGINS: !Sub 'https://www.${DomainName},https://${StagingDomainName}'
         SES_FROM_EMAIL: !Sub 'noreply@${SesSenderDomain}'
         S3_BUCKET_NAME: !Ref FileBucketName
         FEEDBACK_ENABLED: !Ref FeedbackEnabled
@@ -92,46 +90,36 @@ Parameters:
     Type: String
     Default: unicornconnections.org
     Description: >-
-      The **canonical** name. One of the four public names has to be canonical
-      because email can only carry one link and SES can only send as one
-      identity, and this is it. It is also the origin FRONTEND_URL names;
-      the other three reach the API through CORS_ORIGINS.
+      The canonical name, and since reunion-connect.org was retired on
+      2026-11-01 the only public domain. It is the origin FRONTEND_URL names
+      and the identity SES sends as; www and the staging name reach the API
+      through CORS_ORIGINS.
 
   HostedZoneId:
     Type: String
     Default: Z04780762C3Q0K0DKRGSP
-    Description: Route53 zone for the canonical domain (unicornconnections.org)
-
-  SecondaryDomainName:
-    Type: String
-    Default: reunion-connect.org
-    Description: >-
-      The other public domain. Served identically — same distribution, same
-      certificate, same app — it just is not the one email links to.
-
-  SecondaryHostedZoneId:
-    Type: String
-    Default: Z0466195259YGZ44DUBMY
-    Description: Route53 zone for the secondary domain, and for the staging name
+    Description: Route53 zone for the domain, the www name and the staging name
 
   StagingDomainName:
     Type: String
-    Default: nest.reunion-connect.org
+    Default: nest.unicornconnections.org
     Description: >-
-      Kept deliberately. It is on the certificate and on the distribution
-      throughout, so the new app is reachable at a name of its own while the
-      four public ones are being moved — and afterwards, if something needs
-      checking without going through the public names.
+      A name of the app's own, on the certificate and the distribution
+      whatever ClaimPublicNames says, so a deploy can be checked without going
+      through the public names — and so a ClaimPublicNames=false rollback
+      still leaves the app reachable somewhere. It was nest.reunion-connect.org
+      until that domain was retired.
 
   ClaimPublicNames:
     Type: String
     Default: 'true'
     AllowedValues: ['false', 'true']
     Description: >-
-      Whether this distribution claims the four public names and their DNS
-      records. 'true' since the cutover, because this distribution is what
-      serves them — the parameter creates those records, so a deploy that
-      defaulted to 'false' would remove them and take all four domains down.
+      Whether this distribution claims the public names (the domain and www)
+      and their DNS records. 'true' since the cutover, because this
+      distribution is what serves them — the parameter creates those records,
+      so a deploy that defaulted to 'false' would remove them and take the
+      site down.
       It defaulted to 'false' while the old stack still held the aliases, since
       a CloudFront alias belongs to one distribution account-wide and claiming
       them early fails the deploy. Setting 'false' now is a deliberate
@@ -581,37 +569,24 @@ Resources:
   FrontendCertificate:
     Type: AWS::CertificateManager::Certificate
     Properties:
-      # All five names, in one certificate. A certificate's domain list is
-      # immutable, so changing this list *replaces* the certificate: CloudFormation
-      # issues the new one, validates it, repoints the distribution, and only then
-      # deletes the old. Two ACM replacements were expected; one covering
-      # everything is simpler and leaves the staging name working throughout.
-      #
-      # The staging name earns its place: keeping nest.reunion-connect.org on the
-      # certificate means the new stack can take the new certificate *before* the
-      # cutover, so the certificate is proven issued and serving before the four
-      # public names are taken off the old distribution.
+      # Every name the distribution answers for, in one certificate. A
+      # certificate's domain list is immutable, so changing this list
+      # *replaces* the certificate: CloudFormation issues the new one,
+      # validates it, repoints the distribution, and only then deletes the old.
+      # That is how reunion-connect.org came off — one replacement, with the
+      # public names served throughout.
       DomainName: !Ref DomainName
       SubjectAlternativeNames:
         - !Sub 'www.${DomainName}'
-        - !Ref SecondaryDomainName
-        - !Sub 'www.${SecondaryDomainName}'
         - !Ref StagingDomainName
       ValidationMethod: DNS
-      # Each name is validated in the zone that actually hosts it — the two
-      # apexes live in different hosted zones, and the staging name is a
-      # subdomain of the secondary.
       DomainValidationOptions:
         - DomainName: !Ref DomainName
           HostedZoneId: !Ref HostedZoneId
         - DomainName: !Sub 'www.${DomainName}'
           HostedZoneId: !Ref HostedZoneId
-        - DomainName: !Ref SecondaryDomainName
-          HostedZoneId: !Ref SecondaryHostedZoneId
-        - DomainName: !Sub 'www.${SecondaryDomainName}'
-          HostedZoneId: !Ref SecondaryHostedZoneId
         - DomainName: !Ref StagingDomainName
-          HostedZoneId: !Ref SecondaryHostedZoneId
+          HostedZoneId: !Ref HostedZoneId
 
   FrontendOAC:
     Type: AWS::CloudFront::OriginAccessControl
@@ -631,13 +606,11 @@ Resources:
         # A CloudFront alias belongs to exactly one distribution account-wide,
         # so these cannot be claimed until the old stack releases them. That is
         # what ClaimPublicNames gates: false leaves this distribution on the
-        # staging name only, true takes over the four public names.
+        # staging name only, true takes over the public names.
         Aliases: !If
           - PublicNamesClaimed
           - - !Ref DomainName
             - !Sub 'www.${DomainName}'
-            - !Ref SecondaryDomainName
-            - !Sub 'www.${SecondaryDomainName}'
             - !Ref StagingDomainName
           - [!Ref StagingDomainName]
         DefaultRootObject: index.html
@@ -681,10 +654,15 @@ Resources:
   # RecordSetGroup is created with a CREATE change batch, which fails when the
   # record already exists, so the add would have failed and rolled back the
   # whole deploy. Same logical id, same resolved values, no change at all.
+  #
+  # Its zone changed when the staging name moved to unicornconnections.org.
+  # HostedZoneId is a replacement property, so CloudFormation creates the new
+  # record before deleting the old — and the new name did not exist, so the
+  # CREATE change batch has nothing to collide with.
   FrontendDNSRecords:
     Type: AWS::Route53::RecordSetGroup
     Properties:
-      HostedZoneId: !Ref SecondaryHostedZoneId
+      HostedZoneId: !Ref HostedZoneId
       RecordSets:
         - Name: !Ref StagingDomainName
           Type: A
@@ -692,8 +670,8 @@ Resources:
             DNSName: !GetAtt FrontendDistribution.DomainName
             HostedZoneId: Z2FDTNDATAQYW2  # CloudFront's fixed zone ID
 
-  # The public names, one record group per hosted zone. Created only once the
-  # old distribution has released the aliases — pointing DNS at a distribution
+  # The public names. Created only once the old distribution has released
+  # the aliases — pointing DNS at a distribution
   # that does not answer for the name yields an SSL error rather than a page.
   PrimaryDNSRecords:
     Type: AWS::Route53::RecordSetGroup
@@ -707,23 +685,6 @@ Resources:
             DNSName: !GetAtt FrontendDistribution.DomainName
             HostedZoneId: Z2FDTNDATAQYW2
         - Name: !Sub 'www.${DomainName}'
-          Type: A
-          AliasTarget:
-            DNSName: !GetAtt FrontendDistribution.DomainName
-            HostedZoneId: Z2FDTNDATAQYW2
-
-  SecondaryDNSRecords:
-    Type: AWS::Route53::RecordSetGroup
-    Condition: PublicNamesClaimed
-    Properties:
-      HostedZoneId: !Ref SecondaryHostedZoneId
-      RecordSets:
-        - Name: !Ref SecondaryDomainName
-          Type: A
-          AliasTarget:
-            DNSName: !GetAtt FrontendDistribution.DomainName
-            HostedZoneId: Z2FDTNDATAQYW2
-        - Name: !Sub 'www.${SecondaryDomainName}'
           Type: A
           AliasTarget:
             DNSName: !GetAtt FrontendDistribution.DomainName

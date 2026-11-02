@@ -3,9 +3,9 @@
 A class-reunion platform: schools, class years, a member directory, comments, events, and
 then-and-now photos.
 
-Live at **[unicornconnections.org](https://unicornconnections.org)**, which is the canonical
-name; `www.unicornconnections.org`, `reunion-connect.org` and `www.reunion-connect.org` serve
-the same app.
+Live at **[unicornconnections.org](https://unicornconnections.org)**, and at
+`www.unicornconnections.org`. The second domain, `reunion-connect.org`, was retired on
+2026-11-01.
 
 NestJS 12 API on Lambda behind API Gateway, a React 18 SPA on CloudFront, Aurora PostgreSQL,
 and photos in S3. Raw SQL throughout — no ORM.
@@ -60,13 +60,13 @@ One SAM stack, `classyear-nest`, defined in `infra/template.yaml`:
 
 - **One Lambda** behind `{proxy+}/ANY`, with Nest's router doing the routing. Adding an
   endpoint is a code change, not a template change.
-- **A CloudFront distribution** serving the SPA from S3, holding all four public names plus
-  `nest.reunion-connect.org`, which is kept as a name of the app's own for checking a deploy
-  without going through the public ones.
-- **`ClaimPublicNames`** gates the four public aliases and their DNS records. It defaults to
+- **A CloudFront distribution** serving the SPA from S3, holding both public names plus
+  `nest.unicornconnections.org`, which is kept as a name of the app's own for checking a
+  deploy without going through the public ones.
+- **`ClaimPublicNames`** gates the public aliases and their DNS records. It defaults to
   `true`: the cutover is done, this distribution serves those names, and the parameter is what
-  creates the records — so a deploy defaulting to `false` would remove them and take all four
-  domains down. Setting `false` is a deliberate rollback, not a safe default.
+  creates the records — so a deploy defaulting to `false` would remove them and take the site
+  down. Setting `false` is a deliberate rollback, not a safe default.
 
 A deploy is **two commands**, in this order. `deploy.sh` ships the Lambda and the
 infrastructure; `deploy-web.sh` builds the SPA and publishes it. API first: the API accepting
@@ -85,7 +85,7 @@ has to come from wherever it is kept. A *different* value deploys cleanly and in
 session, signing out every logged-in user.
 
 `smoke-deployed.sh` checks that the stack answers, that photos resolve and uploads are allowed
-to preflight, and that all four public names are served by this distribution. It compares which
+to preflight, and that both public names are served by this distribution. It compares which
 distribution actually holds each alias rather than settling for an HTTP 200, because a name can
 answer 200 while pointing somewhere else entirely.
 
@@ -158,7 +158,7 @@ root; target one with `--workspace @classyear/api`.
   vanish from the UI.
 - **CORS is a list, not a single origin.** The SPA calls the API's own URL, so every deployed
   request is cross-origin. `FRONTEND_URL` is the canonical origin and goes in email links;
-  `CORS_ORIGINS` carries the rest. A single origin would leave three of the four public names
+  `CORS_ORIGINS` carries the rest. A single origin would leave the www and staging names
   failing every request in the browser with a healthy server and empty logs.
 - **Per-class authorization is a service, not a guard.** `ClassScopeService`'s five predicates
   answer "may this user moderate this comment / manage this event / manage or view these photos

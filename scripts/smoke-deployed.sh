@@ -4,7 +4,7 @@
 #
 #   1. the stack answers,
 #   2. photos resolve and uploads are allowed to preflight, and
-#   3. **all four public names are served by the new distribution**.
+#   3. **both public names are served by the new distribution**.
 #
 # Part 3 was the reverse of this until the apex handover: through phase 7 every
 # change was additive, and the gate asserted that neither live domain had
@@ -156,15 +156,14 @@ check "upload preflight from an unlisted origin is refused" 403 \
   "$(preflight https://not-an-origin.example.com)"
 
 echo
-echo "==> All four public names must be served by the NEW app ($STACK)"
+echo "==> Both public names must be served by the NEW app ($STACK)"
 
 NEW_DIST="$(aws cloudformation describe-stacks --stack-name "$STACK" --region "$REGION" \
   --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionId'].OutputValue" --output text 2>/dev/null)"
 NEW_HOST="$(aws cloudfront get-distribution --id "$NEW_DIST" \
   --query 'Distribution.DomainName' --output text 2>/dev/null || echo unknown)"
 
-for domain in unicornconnections.org www.unicornconnections.org \
-              reunion-connect.org www.reunion-connect.org; do
+for domain in unicornconnections.org www.unicornconnections.org; do
   # An alias record resolves to the distribution's addresses, so the IP says
   # nothing — ask which distribution actually holds the alias.
   holder="$(aws cloudfront list-distributions --region "$REGION" \
@@ -205,7 +204,7 @@ echo "  new distribution: $NEW_DIST ($NEW_HOST)"
 
 echo
 if [ "$fail" = "0" ]; then
-  echo "✅ Gate: the new app answers, serves all four public names, and photos work."
+  echo "✅ Gate: the new app answers, serves both public names, and photos work."
 else
   echo "❌ Gate failed — see above." >&2
   exit 1

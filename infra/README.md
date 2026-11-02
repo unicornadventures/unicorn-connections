@@ -29,9 +29,10 @@ gateway endpoint on the same route table conflicts — declaring them again is
 fatal, not redundant. Only SQS is created, because it genuinely does not exist
 and the in-VPC proxy needs it to enqueue.
 
-**`SesSenderDomain` is separate from `DomainName`.** The stack is served from
-`nest.reunion-connect.org` but sends as `noreply@reunion-connect.org`: SES has
-an identity for the apex and none for the subdomain.
+**`SesSenderDomain` is separate from `DomainName`.** They are both
+`unicornconnections.org` today, but they answer different questions — where the
+app is served versus which identity SES will accept — and SES has an identity
+for the apex and none for `nest.`.
 
 **The database is not shared.** Its own Aurora cluster, so neither app's
 migrations can break the other. `SNAPSHOT_IDENTIFIER` restores it from a
@@ -49,10 +50,10 @@ it is `NoEcho`. Splitting them guarantees the config-file half gets dropped —
 which is exactly what happened the first time. `samconfig.toml` keeps only stack
 name, region and bucket settings.
 
-## Deploying does not touch the live domains
+## The domains
 
-The stack is served from `nest.reunion-connect.org`, a subdomain alias. The apex
-records for `reunion-connect.org` and `unicornconnections.org` stay pointed at
-the old distribution. `deploy.sh` refuses an apex `DOMAIN_NAME` outright — a
-CloudFront alias is exclusive to one distribution account-wide, so that handover
-is phase 8's choreography and cannot be done by this stack alone (§8.6).
+This stack serves `unicornconnections.org` and `www.`, plus
+`nest.unicornconnections.org` as a name of its own for checking a deploy. A
+CloudFront alias is exclusive to one distribution account-wide, so `deploy.sh`
+checks before every deploy that no *other* distribution holds the public names.
+`reunion-connect.org` was served here too until it was retired on 2026-11-01.

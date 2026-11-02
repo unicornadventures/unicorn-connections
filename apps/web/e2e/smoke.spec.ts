@@ -93,7 +93,7 @@ test.describe('Smoke Tests - Critical User Flows', () => {
       await page.goto('/');
 
       await expect(page.getByText('Welcome back, Jane')).toBeVisible();
-      await expect(page.getByRole('link', { name: 'ReunionConnect' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'UnicornConnections' })).toBeVisible();
     });
 
     test('should navigate to the directory without errors', async ({ page }) => {
