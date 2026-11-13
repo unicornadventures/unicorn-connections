@@ -1,21 +1,47 @@
 # infra — the `classyear-nest` stack
 
 `template.yaml` is the ~51k-line SAM template of the source app, rebuilt at
-about 450 lines: **one** `ApiFunction` behind `{proxy+}/ANY` instead of 59
-individually-declared functions wired to 68 route events, plus a warmer and the
+about 730 lines: **one** `ApiFunction` behind `{proxy+}/ANY` instead of 59
+individually-declared functions wired to 68 route events, plus the
 password-reset email worker.
 
 ```bash
-JWT_SECRET=$(openssl rand -hex 32) ../scripts/deploy.sh --dry-run   # changeset only
-JWT_SECRET=…                       ../scripts/deploy.sh            # for real
-../scripts/smoke-deployed.sh                                        # the phase 7 gate
+JWT_SECRET=… ../scripts/deploy.sh --dry-run   # changeset only
+JWT_SECRET=… ../scripts/deploy.sh             # for real: Lambda + infrastructure
+../scripts/deploy-web.sh                      # then the SPA
+../scripts/smoke-deployed.sh                  # post-deploy check
 ```
+
+`JWT_SECRET` must be the production value: a different one deploys cleanly and
+signs every user out. It is `NoEcho`, so it comes from wherever it is kept,
+never from `openssl rand` unless a forced sign-out is the intent.
 
 ## Status
 
-Built and **changeset-verified against the real account** — CloudFormation
-accepted a 32-resource changeset, so every `!Ref`/`!GetAtt`/`!Sub` resolves —
-but **not deployed**. See `docs/nestjs-conversion-approach.md` §22.
+Deployed, serving `unicornconnections.org`, `www.` and
+`nest.unicornconnections.org`. Every number below was true in November 2026.
+
+## What this stack does not own
+
+The Aurora cluster (`classyear-dev`), the photo bucket, the database and Lambda
+security groups, and the S3 gateway endpoint belong to **`classyear-serverless`**,
+the stack the old Express app left behind. It runs no code any more; it is
+storage and networking. This stack references those resources by parameter,
+so CloudFormation here can never replace or delete them.
+
+Its template is not in this repo. To change one of its resources — as was done
+for its endpoints, backup retention and the bucket's CORS rules — fetch the
+deployed template, edit it, and apply a changeset that keeps every parameter:
+
+```bash
+aws cloudformation get-template --stack-name classyear-serverless \
+  --template-stage Original --query TemplateBody --output text > serverless.yaml
+# edit, then create-change-set with UsePreviousValue=true for every parameter
+# (pass them as a JSON file), check the changeset, execute it
+```
+
+The VPC is the account's **default VPC** and belongs to no stack. Its IPv6
+range was attached directly; see "Outbound IPv6" in `template.yaml`.
 
 ## Things that are load-bearing
 
@@ -34,13 +60,37 @@ through the free gateway endpoint the old stack created.
 app is served versus which identity SES will accept — and SES has an identity
 for the apex and none for `nest.`.
 
-**The database is not shared.** Its own Aurora cluster, so neither app's
-migrations can break the other. `SNAPSHOT_IDENTIFIER` restores it from a
-snapshot of the live one for realistic data.
+**The schema is not this stack's to change.** `RUN_MIGRATIONS=false`, so a boot
+never alters it; `apps/api/src/cli/init-schema.ts` applies schema changes
+deliberately.
 
-**No `BinarySettings`.** §8.2 expected multipart to need it; §17 established
-there is no multipart anywhere — photo uploads are presigned PUTs the browser
-performs directly against S3.
+**No `BinarySettings`.** There is no multipart anywhere — photo uploads are
+presigned PUTs the browser performs directly against S3.
+
+**No warmer.** A scheduled function used to ping the API to keep it warm. It
+was removed in November 2026: cold starts are acceptable at this traffic, and
+the database auto-pauses after 15 idle minutes regardless.
+
+**The account allows 10 concurrent Lambda executions.** Far above real traffic,
+but a burst past it is throttled, and API Gateway answers a throttled request
+with a 500 — which reads like an application failure. A load test needs a
+quota increase first.
+
+## The bastion is off by default
+
+`BastionInstance` is a Session Manager host that `scripts/backup-db.sh` and
+`scripts/restore-db.sh` tunnel through to the private cluster. It exists only
+while `EnableBastion` is true, and `deploy.sh` defaults that to false, so the
+next ordinary deploy removes it. To take a backup:
+
+```bash
+JWT_SECRET=… ENABLE_BASTION=true ../scripts/deploy.sh   # bastion back
+../scripts/backup-db.sh
+JWT_SECRET=… ../scripts/deploy.sh                       # and gone again
+```
+
+For recovery without it, the cluster keeps 7 days of automated backups for
+point-in-time restore from the RDS console.
 
 ## Parameters live in `scripts/deploy.sh`, not here
 
@@ -56,4 +106,5 @@ This stack serves `unicornconnections.org` and `www.`, plus
 `nest.unicornconnections.org` as a name of its own for checking a deploy. A
 CloudFront alias is exclusive to one distribution account-wide, so `deploy.sh`
 checks before every deploy that no *other* distribution holds the public names.
-`reunion-connect.org` was served here too until it was retired on 2026-11-01.
+`reunion-connect.org` was served here too until November 2026, when it was
+retired: its DNS zone, SES identity and registration are all deleted.
