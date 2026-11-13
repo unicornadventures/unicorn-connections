@@ -22,12 +22,12 @@ but **not deployed**. See `docs/nestjs-conversion-approach.md` §22.
 **`Environment` defaults to `nest`, not `dev`.** Several names are
 account-scoped and `classyear-serverless` already occupies the `dev` variants.
 
-**VPC endpoints are reused, not created.** The shared VPC already carries S3,
-Secrets Manager and SSM endpoints from the old stack. AWS rejects a second
-interface endpoint with private DNS for the same service, and a second S3
-gateway endpoint on the same route table conflicts — declaring them again is
-fatal, not redundant. Only SQS is created, because it genuinely does not exist
-and the in-VPC proxy needs it to enqueue.
+**No interface endpoints: outbound IPv6 instead.** The API function sits in
+the private subnets to reach the database, and the VPC has no NAT. It reaches
+Secrets Manager and SQS over IPv6 through a free egress-only internet gateway,
+which replaced about $44 a month of interface endpoints (SSM, Secrets Manager,
+SQS) in November 2026. See "Outbound IPv6" in `template.yaml`. S3 still goes
+through the free gateway endpoint the old stack created.
 
 **`SesSenderDomain` is separate from `DomainName`.** They are both
 `unicornconnections.org` today, but they answer different questions — where the
