@@ -40,17 +40,19 @@ Globals:
         DB_NAME: !Ref DatabaseName
         DB_USER: classyear_admin
         DATABASE_SECRET_ARN: !Ref DatabaseSecretArn
-        # This app shares the Express app's database and does NOT own the
-        # schema. Both running CREATE TABLE IF NOT EXISTS concurrently can
-        # race on pg_class, and SchemaService rethrows where the source only
-        # logs — so the app that would die is this one.
+        # A boot never alters the schema. Changes are applied deliberately with
+        # apps/api/src/cli/init-schema.ts, not as a side effect of a cold start
+        # — and SchemaService rethrows on failure, so a migration racing a boot
+        # would take the function down. This was first set because the Express
+        # app ran its own initialization against the same database; that app
+        # is gone, but a schema change is still a decision, not a deploy.
         RUN_MIGRATIONS: 'false'
         JWT_SECRET: !Ref JWTSecret
         ADMIN_SEED_PASSWORD_PARAM: !Ref AdminSeedPasswordParam
-        # The canonical origin — but only once this stack actually serves it.
-        # Before the cutover the app answers at the staging name, and pointing
-        # FRONTEND_URL at a name the old app is still serving would put the
-        # wrong host in password-reset links.
+        # The canonical origin — but only while this stack serves it. With
+        # ClaimPublicNames=false (a rollback) the app answers only at the
+        # staging name, and a FRONTEND_URL naming the canonical domain would
+        # put a host that no longer reaches it in password-reset links.
         FRONTEND_URL: !If
           - PublicNamesClaimed
           - !Sub 'https://${DomainName}'
@@ -72,7 +74,7 @@ Parameters:
       Suffix for account-scoped resource names. Must NOT be 'dev' or 'prod'
       while classyear-serverless exists: that stack's file bucket embeds the
       account id and its own Environment value, so a matching one here would
-      fail on "bucket already exists" (docs section 8.5).
+      fail on "bucket already exists".
 
   JWTSecret:
     Type: String
@@ -150,11 +152,10 @@ Parameters:
     Type: String
     Default: classyear-dev.cluster-cezswsoi8m3o.us-east-1.rds.amazonaws.com
     Description: >-
-      Writer endpoint of the EXISTING Aurora cluster. This stack shares the
-      Express app's database rather than creating its own: the two are one
-      product on two domains, and separate databases would fork the data (docs
-      section 23). The schemas are byte-identical, which the schema parity gate
-      re-proves on every run.
+      Writer endpoint of the EXISTING Aurora cluster, owned by
+      classyear-serverless. It holds all of this app's data — the Express app
+      that used it first is gone — and this stack references it rather than
+      owning it, so no deploy here can replace or delete it.
 
   DatabaseSecretArn:
     Type: String
@@ -168,11 +169,11 @@ Parameters:
     Type: String
     Default: classyear-file-storage-372666940943-dev
     Description: >-
-      The EXISTING photo bucket, shared with the Express app for the same reason
-      the database is (docs section 27). Photo keys live in the shared database,
-      so a bucket of this stack's own holds none of the objects those rows name
-      and every photo 404s. Its CORS rules live in the old stack's template and
-      must list this app's origin, or presigned uploads fail their preflight.
+      The EXISTING photo bucket, owned by classyear-serverless. Photo keys live
+      in the database, so a bucket of this stack's own would hold none of the
+      objects those rows name and every photo would 404. Its CORS rules live in
+      classyear-serverless's template and must list every origin this app is
+      served from, or presigned uploads fail their preflight.
 
   # The default VPC's Amazon-provided IPv6 range, attached directly on
   # 2026-11-13, is 2600:1f10:477b:7f00::/56; the private subnets take its
@@ -196,11 +197,10 @@ Parameters:
     Type: String
     Default: sg-02fa56b60b644cc22
     Description: >-
-      The EXISTING app's Lambda security group, reused rather than recreated.
-      The cluster's security group admits 5432 from this group only, so joining
-      it is what lets these functions reach the database WITHOUT modifying the
-      live stack — which matters, since phase 8 is meant to be the only phase
-      that touches it.
+      The Lambda security group owned by classyear-serverless, reused rather
+      than recreated. The cluster's security group admits 5432 from this group
+      only, so joining it is what lets these functions reach the database
+      without editing the other stack's resources.
 
   EnableBastion:
     Type: String
@@ -369,49 +369,41 @@ Resources:
             Resource: '*'
 
   # ---------------------------------------------------------------------------
-  # Storage — SHARED with classyear-serverless, not created here
+  # Storage — owned by classyear-serverless, not created here
   # ---------------------------------------------------------------------------
   #
   # There is no FileBucket resource for the same reason there is no RDSCluster:
-  # the photo keys live in the shared database, so a separate bucket forks the
-  # data exactly as a separate cluster would. This stack had its own
-  # `classyear-nest-files-...` bucket through phases 7–8, and the effect was
-  # that every photo 404'd — the keys in the shared `profiles` and
-  # `gallery_photos` rows named objects in the *other* bucket, and this app
-  # signed valid URLs against an empty one.
+  # the photo keys live in the database, so they only resolve against the
+  # bucket they were written to. This stack had its own
+  # `classyear-nest-files-...` bucket during the migration, and the effect was
+  # that every photo 404'd — the keys in the `profiles` and `gallery_photos`
+  # rows named objects in the *other* bucket, and this app signed valid URLs
+  # against an empty one.
   #
-  # `FileBucketName` therefore points at the existing bucket. Two consequences
-  # worth knowing:
-  #
-  #   * The bucket's CORS rules belong to the old stack's template, so the
-  #     origin this app is served from has to be added *there* — a presigned
-  #     PUT is a browser request straight to S3 and the bucket is what answers
-  #     the preflight. Serving a new domain without that change breaks
-  #     uploads while leaving display working.
-  #   * Deleting a photo here deletes it for both apps. That is the point —
-  #     they are one product — but it means known-bugs #12's delete-on-replace
-  #     now acts on shared objects.
+  # `FileBucketName` therefore points at the existing bucket. The consequence
+  # worth knowing: its CORS rules belong to classyear-serverless's template, so
+  # an origin this app is served from has to be added *there* — a presigned
+  # PUT is a browser request straight to S3, and the bucket is what answers
+  # the preflight. Serving a new name without that change breaks uploads while
+  # leaving display working. infra/README.md says how to change that stack.
 
   # ---------------------------------------------------------------------------
-  # Database — SHARED with classyear-serverless, not created here
+  # Database — owned by classyear-serverless, not created here
   # ---------------------------------------------------------------------------
   #
-  # The two apps are one product on two domains. Separate clusters would fork
-  # the data: someone who signs up on unicornconnections.org would not exist on
-  # reunion-connect.org, and a snapshot-restore would additionally lose every
-  # write between the snapshot and the cutover. So there is no RDSCluster,
-  # RDSWriterInstance, DBSubnetGroup or DBSecurityGroup here — DatabaseHost and
-  # DatabaseSecretArn point at the existing one.
+  # This app took over the Express app's cluster rather than migrating to a new
+  # one: a snapshot-restore would have lost every write between the snapshot
+  # and the switch. The Express app is gone and this is now the only app using
+  # it, but the cluster stays in the other stack, so no deploy here can replace
+  # or delete it. There is no RDSCluster, RDSWriterInstance, DBSubnetGroup or
+  # DBSecurityGroup here — DatabaseHost and DatabaseSecretArn point at it.
   #
-  # Two things make that safe:
-  #   * The schemas are byte-identical. That is the phase 0 gate and it re-runs
-  #     on every `npm run schema:verify` — 78 statements, zero diff.
-  #   * Only one app owns the schema. RUN_MIGRATIONS=false above stands this one
-  #     down; the Express app keeps running its own initialization.
+  # The schema is changed only on purpose: RUN_MIGRATIONS=false above, and
+  # apps/api/src/cli/init-schema.ts to apply changes.
   #
-  # There is also no LambdaSecurityGroup: these functions join the existing
-  # app's group (LambdaSecurityGroupId), which is what the cluster already
-  # admits, so nothing about the live stack has to change.
+  # There is also no LambdaSecurityGroup: these functions join the other
+  # stack's group (LambdaSecurityGroupId), which is what the cluster already
+  # admits, so nothing in that stack has to change.
 
   # ---------------------------------------------------------------------------
   # Outbound IPv6, instead of interface endpoints
@@ -613,9 +605,10 @@ Resources:
         Enabled: true
         Comment: !Sub 'ClassYear NestJS frontend (${Environment})'
         # A CloudFront alias belongs to exactly one distribution account-wide,
-        # so these cannot be claimed until the old stack releases them. That is
-        # what ClaimPublicNames gates: false leaves this distribution on the
-        # staging name only, true takes over the public names.
+        # so the public names could not be claimed until the old stack
+        # released them. That is what ClaimPublicNames gates: false leaves
+        # this distribution on the staging name only, true takes the public
+        # names — which it has since the cutover.
         Aliases: !If
           - PublicNamesClaimed
           - - !Ref DomainName
@@ -704,13 +697,14 @@ Outputs:
     Description: API Gateway base URL
     Value: !Sub 'https://${ClassYearNestAPI}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
   PulseUrl:
-    Description: Health check, for the phase 7 smoke test
+    Description: Health check, for smoke-deployed.sh and uptime checks
     Value: !Sub 'https://${ClassYearNestAPI}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/pulse'
   FrontendUrl:
     Description: >-
-      Where the app is actually reachable — the staging name until the cutover,
-      the canonical domain after it. smoke-deployed.sh reads this, so it checks
-      the name that is really serving rather than one that is merely intended.
+      Where the app is actually reachable — the canonical domain, or the
+      staging name under a ClaimPublicNames=false rollback. smoke-deployed.sh
+      reads this, so it checks the name that is really serving rather than one
+      that is merely intended.
     Value: !If
       - PublicNamesClaimed
       - !Sub 'https://${DomainName}'
@@ -722,10 +716,10 @@ Outputs:
     Description: Invalidate after each frontend deploy
     Value: !Ref FrontendDistribution
   FileBucketName:
-    Description: Shared with classyear-serverless — this stack does not own it
+    Description: Owned by classyear-serverless — this stack does not own it
     Value: !Ref FileBucketName
   DatabaseEndpoint:
-    Description: Shared with classyear-serverless — this stack does not own it
+    Description: Owned by classyear-serverless — this stack does not own it
     Value: !Ref DatabaseHost
   BastionInstanceId:
     Condition: BastionEnabled
