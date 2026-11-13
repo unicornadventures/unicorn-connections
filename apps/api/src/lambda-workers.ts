@@ -1,58 +1,16 @@
 import { NestFactory } from '@nestjs/core';
-import { Logger } from '@nestjs/common';
 import type { SQSHandler } from 'aws-lambda';
-import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { AppModule } from './app.module.js';
 import { EmailService } from './email/email.service.js';
 
 /**
- * The two functions that sit beside the API proxy.
+ * The function that sits beside the API proxy: the password-reset email
+ * worker. SAM points at its handler by name.
  *
- * They live in one file because they are ten lines each and share the same
- * cold-start caching concern; SAM points at each handler by name.
+ * There was a warmer here too, pinging the API on a schedule to keep an
+ * execution environment alive. It was removed on 2026-11-13: cold starts are
+ * acceptable at this site's traffic, and the database pauses regardless.
  */
-
-// ---- warmer ---------------------------------------------------------------
-
-const lambdaClient = new LambdaClient({
-  region: process.env.AWS_REGION ?? 'us-east-1',
-});
-
-/**
- * Keeps the API function's execution environment warm on a schedule.
- *
- * Now has **one** target instead of 59 — the single biggest simplification of
- * the port showing up in the operational layer.
- *
- * The empty payload matters: the proxy rejects it as a malformed event before
- * anything touches the database, so warming never wakes the deliberately
- * pausable Aurora cluster. That property was load-bearing in the source and is
- * preserved.
- */
-export const warmerHandler = async (): Promise<void> => {
-  const targets = (process.env.WARM_FUNCTION_NAMES ?? '')
-    .split(',')
-    .filter(Boolean);
-
-  await Promise.all(
-    targets.map((FunctionName) =>
-      lambdaClient
-        .send(
-          new InvokeCommand({
-            FunctionName,
-            InvocationType: 'Event',
-            Payload: Buffer.from('{}'),
-          }),
-        )
-        .catch((error: unknown) =>
-          Logger.error(
-            `Warm ping failed for ${FunctionName}: ${String(error)}`,
-            'Warmer',
-          ),
-        ),
-    ),
-  );
-};
 
 // ---- password-reset email worker -----------------------------------------
 

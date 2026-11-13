@@ -86,8 +86,8 @@ export function configureApp(app: INestApplication): void {
     }),
   );
 
-  // Every route is under /api except /pulse, which the SAM warmer and uptime
-  // checks hit at the root — matching the Express app, where /pulse was
+  // Every route is under /api except /pulse, which uptime checks and
+  // smoke-deployed.sh hit at the root — matching the Express app, where /pulse was
   // registered directly on the app and the routers were mounted under /api/*.
   app.setGlobalPrefix('api', {
     exclude: [{ path: 'pulse', method: RequestMethod.GET }],

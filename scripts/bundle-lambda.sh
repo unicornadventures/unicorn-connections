@@ -53,7 +53,7 @@ bundle() {
 echo "==> Bundling the API proxy"
 bundle "$REPO_ROOT/apps/api/dist/lambda.js" "$OUT/api/index.mjs"
 
-echo "==> Bundling the warmer and email worker"
+echo "==> Bundling the email worker"
 bundle "$REPO_ROOT/apps/api/dist/lambda-workers.js" "$OUT/workers/index.mjs"
 
 # Lambda decides CJS-vs-ESM from the file extension and the nearest package.json.

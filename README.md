@@ -152,8 +152,8 @@ root; target one with `--workspace @classyear/api`.
 - **Environment is validated at boot and the app refuses to start if it is wrong.** There are
   no fallback defaults — a missing `JWT_SECRET` is a failure to boot, not a silently different
   signing key. See `apps/api/src/config/configuration.ts`.
-- **`/pulse` is the only route outside `/api`.** The global prefix excludes it; the Lambda
-  warmer hits it at the root.
+- **`/pulse` is the only route outside `/api`.** The global prefix excludes it; uptime checks
+  and `smoke-deployed.sh` hit it at the root.
 - **Errors are always `{ "error": "..." }`.** `AllExceptionsFilter` guarantees it, because the
   frontend reads `err.response.data.error` and a differently-shaped body makes the message
   vanish from the UI.
