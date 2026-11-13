@@ -35,8 +35,14 @@ export class PasswordResetDispatcher {
     const { SQSClient, SendMessageCommand } = await import(
       '@aws-sdk/client-sqs'
     );
+    // The function's only way out of the VPC is IPv6 (see "Outbound IPv6" in
+    // template.yaml), and SQS answers on IPv6 only at its dual-stack hostname.
+    // The SDK otherwise sends to the queue URL's own host, which is IPv4-only,
+    // so that has to be switched off for the dual-stack endpoint to be used.
     const client = new SQSClient({
       region: this.config.get<string>('awsRegion') ?? 'us-east-1',
+      useDualstackEndpoint: true,
+      useQueueUrlAsEndpoint: false,
     });
 
     await client.send(

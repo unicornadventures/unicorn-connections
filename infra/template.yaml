@@ -174,6 +174,24 @@ Parameters:
       and every photo 404s. Its CORS rules live in the old stack's template and
       must list this app's origin, or presigned uploads fail their preflight.
 
+  # The default VPC's Amazon-provided IPv6 range, attached directly on
+  # 2026-11-13, is 2600:1f10:477b:7f00::/56; the private subnets take its
+  # first two /64s. Given as values rather than carved with Fn::Cidr, which
+  # CloudFormation accepts for IPv6 but cfn-lint (run by deploy.sh) rejects.
+  PrivateSubnet1Ipv6Cidr:
+    Type: String
+    Default: 2600:1f10:477b:7f00::/64
+  PrivateSubnet2Ipv6Cidr:
+    Type: String
+    Default: 2600:1f10:477b:7f01::/64
+
+  PrivateRouteTableId:
+    Type: String
+    Default: rtb-06b3ba09c86210f60
+    Description: >-
+      The route table of the private subnets, which this stack adds the
+      outbound IPv6 route to. It belongs to the default VPC, not to a stack.
+
   LambdaSecurityGroupId:
     Type: String
     Default: sg-02fa56b60b644cc22
@@ -199,7 +217,7 @@ Parameters:
     Description: >-
       Public-Subnet-1, for the bastion. Public so it reaches the Session
       Manager services over the internet gateway — the VPC has no NAT and no
-      ssmmessages or ec2messages endpoints.
+      Session Manager endpoints.
 
   BastionImageId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -228,6 +246,9 @@ Resources:
 
   ApiFunction:
     Type: AWS::Serverless::Function
+    # Ipv6AllowedForDualStack is refused unless every subnet already has an
+    # IPv6 range, and the attachment cannot be inferred from a !Ref.
+    DependsOn: [PrivateSubnet1Ipv6, PrivateSubnet2Ipv6]
     Properties:
       FunctionName: !Sub 'classyear-nest-api-${Environment}'
       # Pre-bundled by scripts/bundle-lambda.sh. This is an npm-workspaces
@@ -237,8 +258,12 @@ Resources:
       CodeUri: build/api/
       Handler: index.handler
       VpcConfig:
-        SecurityGroupIds: [!Ref LambdaSecurityGroupId]
+        # The second group only adds outbound IPv6: the shared Lambda group
+        # belongs to classyear-serverless and allows outbound IPv4 alone.
+        SecurityGroupIds: [!Ref LambdaSecurityGroupId, !Ref ApiIpv6EgressSecurityGroup]
         SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+        # The function's only way out of the VPC. See "Outbound IPv6" below.
+        Ipv6AllowedForDualStack: true
       Events:
         # Every route the app serves, including /pulse at the root. Nest's
         # global prefix puts everything else under /api.
@@ -416,49 +441,63 @@ Resources:
   # app's group (LambdaSecurityGroupId), which is what the cluster already
   # admits, so nothing about the live stack has to change.
 
-  # The only security group this stack creates: the SQS endpoint needs one that
-  # admits 443 from the app's functions, and those now sit in the *existing*
-  # app's Lambda group — referenced by id, so nothing about the live stack has
-  # to change.
-  VPCEndpointSecurityGroup:
+  # ---------------------------------------------------------------------------
+  # Outbound IPv6, instead of interface endpoints
+  # ---------------------------------------------------------------------------
+  #
+  # The API function lives in the private subnets to reach the database, and
+  # the VPC has no NAT. It still has to call Secrets Manager (the database
+  # password, at cold start) and SQS (password-reset emails). Interface
+  # endpoints did that, at $0.01 per endpoint per AZ-hour — about $29 a month
+  # for two endpoints, nearly the whole bill of a site this size.
+  #
+  # An egress-only internet gateway is free and gives outbound-only IPv6, and
+  # both services answer on IPv6: Secrets Manager on its normal hostname, SQS
+  # on its dual-stack one (sqs.<region>.api.aws), which the dispatcher asks for.
+  # The function runs Node 22, whose connect tries IPv4 and IPv6 together, so
+  # an IPv4 address with no route costs nothing.
+  #
+  # The VPC is the account's default VPC and belongs to no stack, so its
+  # IPv6 range was attached directly (see PrivateSubnet1Ipv6Cidr): CloudFormation cannot
+  # report the range it assigns to a VPC it does not own, so the subnets could
+  # not be carved from it here. The resources below only add to the VPC.
+  # Removing them returns the API to IPv4-only, which needs endpoints back.
+
+  PrivateSubnet1Ipv6:
+    Type: AWS::EC2::SubnetCidrBlock
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      Ipv6CidrBlock: !Ref PrivateSubnet1Ipv6Cidr
+
+  PrivateSubnet2Ipv6:
+    Type: AWS::EC2::SubnetCidrBlock
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      Ipv6CidrBlock: !Ref PrivateSubnet2Ipv6Cidr
+
+  EgressOnlyGateway:
+    Type: AWS::EC2::EgressOnlyInternetGateway
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateIpv6DefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableId
+      DestinationIpv6CidrBlock: '::/0'
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyGateway
+
+  # The only security group this stack creates. Outbound IPv6 for the API
+  # function, nothing inbound; the shared Lambda group it sits beside admits
+  # the database and allows outbound IPv4.
+  ApiIpv6EgressSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: HTTPS from the classyear-nest functions to the SQS endpoint
+      GroupDescription: Outbound IPv6 for the classyear-nest API function
       VpcId: !Ref VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          SourceSecurityGroupId: !Ref LambdaSecurityGroupId
-
-  # **Only SQS is created here.** The VPC already carries S3 (gateway),
-  # Secrets Manager and SSM endpoints, created by classyear-serverless:
-  #
-  #   vpce-07830105a43dcca1d  com.amazonaws.us-east-1.s3              Gateway
-  #   vpce-0e68fc1b5d2512c07  com.amazonaws.us-east-1.secretsmanager  Interface, private DNS
-  #   vpce-0fd51366aab59bdfc  com.amazonaws.us-east-1.ssm             Interface, private DNS
-  #
-  # Endpoints are VPC-level shared infrastructure, not per-application: private
-  # DNS means anything in these subnets already resolves those services through
-  # them, including this stack's functions. Declaring duplicates is not merely
-  # redundant, it **fails the deploy** — AWS rejects a second interface endpoint
-  # with private DNS for a service already covered in the VPC, and a second S3
-  # gateway endpoint on the same route table conflicts on the route it inserts.
-  #
-  # The collision table did not list this one.
-  #
-  # SQS is genuinely absent, and this stack needs it: the source ran
-  # forgot-password outside the VPC, but here the one proxy function is in-VPC
-  # and still has to enqueue for the email worker.
-  SQSVPCEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcId: !Ref VPC
-      ServiceName: !Sub com.amazonaws.${AWS::Region}.sqs
-      VpcEndpointType: Interface
-      PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-      SecurityGroupIds: [!Ref VPCEndpointSecurityGroup]
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIpv6: '::/0'
 
   # ---------------------------------------------------------------------------
   # Bastion: a Session Manager port-forward to the database, for backups
@@ -473,14 +512,12 @@ Resources:
   # caller's IAM identity allows for ssm:StartSession.
   #
   # It joins the existing Lambda security group rather than getting one of its
-  # own, and that is load-bearing, not a shortcut. Two groups owned by
-  # classyear-serverless gate the paths it needs: the cluster's admits 5432
-  # only from that group, and the SSM interface endpoint's admits 443 only
-  # from it. Private DNS sends ssm.us-east-1.amazonaws.com to that endpoint
-  # from anywhere in the VPC, public subnets included, so a bastion in a group
-  # of its own could not even register with Session Manager — and admitting a
-  # new group would mean editing the other stack's resources. The Lambda
-  # group has no inbound rules, so membership grants reach and nothing else.
+  # own, because the cluster's security group (owned by classyear-serverless)
+  # admits 5432 only from that group, and admitting a new group would mean
+  # editing the other stack's resources. The Lambda group has no inbound
+  # rules, so membership grants reach and nothing else. It reaches Session
+  # Manager over the internet: the SSM interface endpoint that once
+  # intercepted ssm.* inside the VPC was removed on 2026-11-13.
 
   BastionRole:
     Type: AWS::IAM::Role
