@@ -73,7 +73,7 @@ INSTANCE="$(aws cloudformation describe-stacks --stack-name "$STACK" --region "$
   --query "Stacks[0].Outputs[?OutputKey=='BastionInstanceId'].OutputValue" --output text)"
 if [ -z "$INSTANCE" ] || [ "$INSTANCE" = "None" ]; then
   echo "The stack has no BastionInstanceId output. Deploy it with the bastion enabled" >&2
-  echo "(ENABLE_BASTION defaults to true in scripts/deploy.sh)." >&2
+  echo "(it is off by default: JWT_SECRET=… ENABLE_BASTION=true ./scripts/deploy.sh)." >&2
   exit 1
 fi
 
