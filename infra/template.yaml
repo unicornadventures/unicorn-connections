@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: ClassYear (NestJS) - one proxy function + warmer + email worker
+Description: ClassYear (NestJS) - one proxy function + email worker
 
 # =============================================================================
 # This is the ~51k-line template of the source app, rebuilt.
@@ -286,34 +286,6 @@ Resources:
             BucketName: !Ref FileBucketName
         - SQSSendMessagePolicy:
             QueueName: !GetAtt PasswordResetEmailQueue.QueueName
-
-  # ---------------------------------------------------------------------------
-  # Warmer — now one target instead of 59
-  # ---------------------------------------------------------------------------
-
-  WarmerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub 'classyear-nest-warmer-${Environment}'
-      CodeUri: build/workers/
-      Handler: index.warmerHandler
-      Timeout: 10
-      # Outside the VPC: it only calls the Lambda API.
-      Environment:
-        Variables:
-          WARM_FUNCTION_NAMES: !Ref ApiFunction
-      Events:
-        WarmSchedule:
-          Type: Schedule
-          Properties:
-            Schedule: rate(5 minutes)
-            Enabled: true
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action: lambda:InvokeFunction
-              Resource: !GetAtt ApiFunction.Arn
 
   # ---------------------------------------------------------------------------
   # Password-reset email worker — the queue is kept deliberately
