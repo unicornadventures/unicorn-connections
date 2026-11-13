@@ -50,7 +50,7 @@ docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}' 
 | `./scripts/bundle-lambda.sh` | esbuild the API into `infra/build/` Lambda artifacts |
 | `JWT_SECRET=… ./scripts/deploy.sh --dry-run` | Changeset only — proves the template applies |
 | `./scripts/smoke-deployed.sh` | Post-deploy gate against the live stack |
-| `./scripts/backup-db.sh` | `pg_dump` production to `tmp/backups/`, tunnelled through the Session Manager bastion |
+| `./scripts/backup-db.sh` | `pg_dump` production to `tmp/backups/` through the Session Manager bastion — deploy with `ENABLE_BASTION=true` first; it is off by default |
 | `./scripts/backup-photos.sh` | Copy every uploaded photo to `tmp/backups/photos/`, verified, with a manifest per run |
 | `./scripts/restore-photos.sh --dry-run` | Put backed-up photos back — only missing ones unless `--overwrite` |
 
