@@ -50,6 +50,7 @@ docker inspect <container> --format '{{range .Config.Env}}{{println .}}{{end}}' 
 | `./scripts/bundle-lambda.sh` | esbuild the API into `infra/build/` Lambda artifacts |
 | `JWT_SECRET=… ./scripts/deploy.sh --dry-run` | Changeset only — proves the template applies |
 | `./scripts/smoke-deployed.sh` | Post-deploy gate against the live stack |
+| `./scripts/site-mode.sh status \| pause \| live` | Pause the site behind a back-soon page with the API off, or bring it back; no data is touched |
 | `./scripts/backup-db.sh` | `pg_dump` production to `tmp/backups/` through the Session Manager bastion — deploy with `ENABLE_BASTION=true` first; it is off by default |
 | `./scripts/restore-db.sh <dump>` | Restore a dump into a **new** database; `--replace class_reunion` overwrites production after a safety dump. Needs the bastion, like `backup-db.sh` |
 | `./scripts/backup-photos.sh` | Copy every uploaded photo to `tmp/backups/photos/`, verified, with a manifest per run |

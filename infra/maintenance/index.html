@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- scripts/site-mode.sh looks for this marker to tell paused from live. -->
+    <meta name="site-mode" content="paused" />
+    <meta name="robots" content="noindex" />
+    <title>UnicornConnections — back soon</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --navy: #0E2240;
+        --navy-deep: #0a1a30;
+        --gold: #E8A93E;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1.25rem;
+        background: radial-gradient(ellipse at top, var(--navy) 0%, var(--navy-deep) 70%);
+        color: rgba(255, 255, 255, 0.85);
+        font-family: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        text-align: center;
+      }
+      .brand {
+        font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+        font-weight: 700;
+        font-size: clamp(2rem, 6vw, 3rem);
+        letter-spacing: -0.01em;
+        color: var(--gold);
+        margin: 0 0 1.5rem;
+      }
+      h1 {
+        font-weight: 500;
+        font-size: clamp(1.25rem, 3.5vw, 1.6rem);
+        color: #fff;
+        margin: 0 0 0.75rem;
+      }
+      p {
+        max-width: 32rem;
+        margin: 0 auto;
+        line-height: 1.6;
+        font-size: 1rem;
+      }
+      .rule {
+        width: 3rem;
+        height: 3px;
+        border: 0;
+        background: var(--gold);
+        margin: 0 auto 1.5rem;
+        border-radius: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand">UnicornConnections</div>
+      <hr class="rule" />
+      <h1>We're taking a short break.</h1>
+      <p>
+        The site is paused for now. Your account, your classmates and every
+        photo are kept safe, and everything will be just as you left it when we're back.
+      </p>
+    </main>
+  </body>
+</html>

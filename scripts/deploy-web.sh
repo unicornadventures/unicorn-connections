@@ -40,6 +40,18 @@ for pair in "FrontendBucketName:$BUCKET" "FrontendDistributionId:$DISTRIBUTION" 
   fi
 done
 
+# A paused site (scripts/site-mode.sh) has the API switched off. Publishing the
+# SPA then would put a UI in front of users that fails every call, so refuse
+# and point at the command that turns the API on first.
+API_FUNCTION="$(aws cloudformation describe-stack-resource --stack-name "$STACK" --region "$REGION" \
+  --logical-resource-id ApiFunction --query StackResourceDetail.PhysicalResourceId --output text)"
+if [ "$(aws lambda get-function-concurrency --function-name "$API_FUNCTION" --region "$REGION" \
+      --query ReservedConcurrentExecutions --output text)" = "0" ]; then
+  echo "The API is switched off — the site is paused. Use ./scripts/site-mode.sh live," >&2
+  echo "which switches the API on and then runs this script." >&2
+  exit 1
+fi
+
 # The deployed SPA calls the API **cross-origin**, at its API Gateway URL.
 #
 # Not the relative `/api` that apps/web/.env.example suggests: the CloudFront
